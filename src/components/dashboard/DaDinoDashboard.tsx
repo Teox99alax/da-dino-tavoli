@@ -8,13 +8,14 @@ import {
   CheckCircle2,
   CloudRain,
   Clock3,
-  Map,
+  MapPinned,
   Plus,
   Search,
   ShieldAlert,
   Trash2,
   Users,
   Utensils,
+  Zap,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,8 @@ type Risk = "basso" | "medio" | "alto";
 type Awning = "aperte" | "chiuse";
 type Consumption = "pinsa" | "cucina" | "misto" | "non_so";
 type Category = "normale" | "affezionato" | "molto_importante";
-type Status = "confermata" | "arrivato" | "seduto" | "in_uscita" | "liberato" | "no_show";
+type Status = "confermata" | "arrivato" | "seduto" | "in_uscita" | "pagato" | "liberato" | "no_show";
+type MapTurnFilter = "tutto" | "primo" | "secondo";
 
 type Table = {
   id: string;
@@ -58,7 +60,6 @@ type Reservation = {
   phone: string;
   time: string;
   adults: number;
-  children: number;
   highchairs: number;
   category: Category;
   areaPreference: Area | "nessuna";
@@ -67,6 +68,7 @@ type Reservation = {
   status: Status;
   consumption: Consumption;
   notes: string;
+  seatedAt?: number;
 };
 
 type Settings = {
@@ -84,7 +86,6 @@ type FormState = {
   phone: string;
   time: string;
   adults: number;
-  children: number;
   highchairs: number;
   category: Category;
   areaPreference: Area | "nessuna";
@@ -95,11 +96,13 @@ type FormState = {
 type ScoredOption = Option & {
   score: number;
   warnings: string[];
+  reasons: string[];
   turn: string;
   estimatedEnd: string;
   resetEnd: string;
   duration: number;
-  passaggio?: string;
+  passageMessage: string;
+  availabilityMessage: string;
 };
 
 const AREAS: Area[] = ["sala", "saletta", "dehor", "esterno"];
@@ -123,7 +126,7 @@ const tables: Table[] = [
   { id: "saletta-4", label: "4 saletta", area: "saletta", standard: 4, max: 4, notes: "Divisibile 2+2" },
   ...[1, 2, 3, 9, 10].map((n) => ({ id: `dehor-${n}`, label: `${n} dehor`, area: "dehor" as Area, standard: 2, max: 2, notes: "Tavolo da 2" })),
   ...[4, 5, 6, 7, 8].map((n) => ({ id: `dehor-${n}`, label: `${n} dehor`, area: "dehor" as Area, standard: 4, max: 4, notes: "Tavolo da 4" })),
-  ...[11, 12, 13, 14].map((n) => ({ id: `dehor-${n}`, label: `${n} dehor`, area: "dehor" as Area, standard: 2, max: 3, notes: "Marciapiede 2+1", sidewalk: true })),
+  ...[11, 12, 13, 14].map((n) => ({ id: `dehor-${n}`, label: `${n} dehor`, area: "dehor" as Area, standard: 2, max: 3, notes: "Marciapiede 2+1 seggiolone", sidewalk: true })),
 ];
 
 const combos: Option[] = [
@@ -137,7 +140,7 @@ const combos: Option[] = [
   { id: "dehor-3-4", label: "3+4 dehor", area: "dehor", tables: ["dehor-3", "dehor-4"], standard: 6, max: 8, notes: "8 solo tende aperte", needsOpenAwningFor8: true, manual: true },
   { id: "dehor-8-9", label: "8+9 dehor", area: "dehor", tables: ["dehor-8", "dehor-9"], standard: 6, max: 8, notes: "8 solo tende aperte", needsOpenAwningFor8: true, manual: true },
   { id: "dehor-10-7", label: "10+7 dehor", area: "dehor", tables: ["dehor-10", "dehor-7"], standard: 6, max: 7, notes: "7 solo seggiolone" },
-  { id: "esterno-flex", label: "Esterno modulabile", area: "esterno", tables: ["esterno-flex"], standard: 30, max: 40, notes: "30 adulti componibili; oltre 30 solo con bambini/seggioloni", flexibleExternal: true },
+  { id: "esterno-flex", label: "Esterno modulabile", area: "esterno", tables: ["esterno-flex"], standard: 30, max: 40, notes: "30 adulti componibili. Con bambini/seggioloni può superare 30, da controllare manualmente.", flexibleExternal: true },
 ];
 
 function todayISO() {
@@ -160,7 +163,7 @@ function duration(c: Consumption, s: Settings) {
   return Math.round((s.pinsaPct / 100) * 75 + (s.kitchenPct / 100) * 105);
 }
 
-function turn(time: string, service: Service) {
+function getTurn(time: string, service: Service) {
   if (service === "pranzo") return "pranzo";
   if (SLOTS.first.includes(time)) return "primo turno";
   if (SLOTS.second.includes(time)) return "secondo turno";
@@ -182,6 +185,16 @@ function isActiveStatus(status: Status) {
   return !["liberato", "no_show"].includes(status);
 }
 
+function statusColor(status: Status) {
+  if (status === "confermata") return "bg-yellow-100 text-yellow-900";
+  if (status === "arrivato") return "bg-green-100 text-green-900";
+  if (status === "seduto") return "bg-blue-100 text-blue-900";
+  if (status === "in_uscita") return "bg-purple-100 text-purple-900";
+  if (status === "pagato") return "bg-gray-100 text-gray-900";
+  if (status === "no_show") return "bg-red-100 text-red-900";
+  return "bg-gray-100 text-gray-900";
+}
+
 function Stat({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: React.ReactNode }) {
   return (
     <Card className="rounded-2xl shadow-sm">
@@ -200,8 +213,10 @@ export default function DaDinoDashboard() {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [settings, setSettings] = useState<Settings>({ service: "cena", weather: "normale", risk: "medio", awning: "chiuse", resetMinutes: 10, pinsaPct: 60, kitchenPct: 40 });
   const [area, setArea] = useState<Area>("sala");
+  const [mapTurn, setMapTurn] = useState<MapTurnFilter>("tutto");
+  const [search, setSearch] = useState("");
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [form, setForm] = useState<FormState>({ name: "", phone: "", time: "21:00", adults: 2, children: 0, highchairs: 0, category: "normale", areaPreference: "nessuna", consumption: "non_so", notes: "" });
+  const [form, setForm] = useState<FormState>({ name: "", phone: "", time: "21:00", adults: 2, highchairs: 0, category: "normale", areaPreference: "nessuna", consumption: "non_so", notes: "" });
 
   const dayReservations = useMemo(() => reservations.filter((r) => r.date === selectedDate), [reservations, selectedDate]);
   const activeReservations = useMemo(() => dayReservations.filter((r) => isActiveStatus(r.status)), [dayReservations]);
@@ -211,42 +226,47 @@ export default function DaDinoDashboard() {
     return [...singleTables, ...combos];
   }, []);
 
-  function disabled(t: Table) {
+  function tableDisabled(t: Table) {
     return settings.weather === "pioggia" && (t.area === "esterno" || !!t.sidewalk);
   }
 
-  function score(o: Option): ScoredOption | null {
-    let s = 100;
+  function mapFilterReservation(r: Reservation & { turn: string }) {
+    if (mapTurn === "primo") return r.turn === "primo turno";
+    if (mapTurn === "secondo") return r.turn === "secondo turno";
+    return true;
+  }
+
+  function getAvailabilityMessage(option: Option, start: number, resetEnd: number) {
+    const sameTables = activeReservations
+      .filter((r) => option.tables.some((code) => r.tableIds.includes(code)))
+      .map((r) => ({ r, t: times(r, settings) }))
+      .sort((a, b) => a.t.start - b.t.start);
+
+    const previous = sameTables.filter((x) => x.t.resetEnd <= start).pop();
+    const next = sameTables.find((x) => x.t.start >= resetEnd);
+
+    const before = previous ? `libero dalle ${fromMin(previous.t.resetEnd)}` : "libero da inizio servizio";
+    const until = next ? `dabile fino alle ${fromMin(next.t.start)}` : "nessuna prenotazione successiva";
+    const again = `torna disponibile alle ${fromMin(resetEnd)}`;
+    return `${before}; ${until}; ${again}`;
+  }
+
+  function scoreOption(o: Option): ScoredOption | null {
+    let score = 100;
     const warnings: string[] = [];
+    const reasons: string[] = [];
     const adults = Number(form.adults || 0);
-    const children = Number(form.children || 0);
     const highchairs = Number(form.highchairs || 0);
-    const total = adults + children + highchairs;
+    const total = adults + highchairs;
 
     if (settings.weather === "pioggia" && o.area === "esterno") return null;
     if (settings.weather === "pioggia" && o.tables.some((x) => ["dehor-11", "dehor-12", "dehor-13", "dehor-14"].includes(x))) return null;
     if ((settings.weather === "pioggia" || settings.awning === "chiuse") && o.needsOpenAwningFor8 && total > 6) return null;
 
+    const ct = times(form, settings);
+
     if (o.flexibleExternal) {
       if (adults > 30) return null;
-      if (settings.weather === "rischio") {
-        s -= settings.risk === "basso" ? 50 : settings.risk === "medio" ? 25 : 8;
-        warnings.push("Esterno con rischio meteo");
-      }
-      if (adults >= 14) warnings.push("Gruppo grande esterno: confermare disposizione manuale");
-    } else if (total > o.max) {
-      return null;
-    }
-
-    const ct = times(form, settings);
-    if (!o.flexibleExternal) {
-      for (const r of activeReservations) {
-        const rt = times(r, settings);
-        if (overlap(ct.start, ct.resetEnd, rt.start, rt.resetEnd) && o.tables.some((x) => r.tableIds.includes(x))) return null;
-      }
-    }
-
-    if (o.flexibleExternal) {
       const usedExternal = activeReservations
         .filter((r) => r.tableIds.includes("esterno-flex"))
         .filter((r) => {
@@ -255,59 +275,96 @@ export default function DaDinoDashboard() {
         })
         .reduce((sum, r) => sum + r.adults, 0);
       if (usedExternal + adults > 30) return null;
-      s += 20;
-      warnings.push(`Esterno: ${30 - usedExternal - adults} posti adulti residui nello stesso orario`);
-    }
-
-    const empty = o.standard - adults;
-    if (!o.flexibleExternal) {
-      if (empty === 0) s += 40;
-      if (empty === 1) s += 14;
-      if (empty > 1) { s -= empty * 35; warnings.push("Spreco posti sopra la tolleranza"); }
-      if (adults > o.standard) { s -= 18; warnings.push("Soluzione stretta/capotavola"); }
+      score += 20;
+      reasons.push("Esterno modulabile: massimo riempimento flessibile");
+      warnings.push(`Esterno: restano ${30 - usedExternal - adults} posti adulti nello stesso orario`);
+      if (settings.weather === "rischio") {
+        score -= settings.risk === "basso" ? 50 : settings.risk === "medio" ? 25 : 8;
+        warnings.push("Esterno con rischio meteo");
+      }
+    } else {
+      if (total > o.max) return null;
+      for (const r of activeReservations) {
+        const rt = times(r, settings);
+        if (overlap(ct.start, ct.resetEnd, rt.start, rt.resetEnd) && o.tables.some((x) => r.tableIds.includes(x))) return null;
+      }
+      const empty = o.standard - adults;
+      if (empty === 0) { score += 40; reasons.push("Riempie perfettamente il tavolo"); }
+      if (empty === 1) { score += 14; reasons.push("Spreco massimo 1 posto") ; }
+      if (empty > 1) { score -= empty * 35; warnings.push("Spreco posti sopra la tolleranza"); }
+      if (adults > o.standard) { score -= 18; warnings.push("Soluzione stretta/capotavola"); }
     }
 
     if (form.areaPreference !== "nessuna" && form.areaPreference !== o.area) {
       warnings.push("Preferenza area non rispettata");
-      if (form.category !== "normale") s -= 45;
+      if (form.category !== "normale") score -= 45;
     } else if (form.areaPreference === o.area) {
-      s += form.category === "normale" ? 5 : 35;
+      score += form.category === "normale" ? 5 : 35;
+      reasons.push("Rispetta la preferenza area");
     }
 
-    const tr = turn(form.time, settings.service);
-    if (tr === "fuori turno") { s -= 70; warnings.push("Fuori turno: forzatura manuale"); }
-    if (settings.service === "cena" && tr === "primo turno" && ct.resetEnd > toMin("21:00")) { s -= 80; warnings.push("Rischia di compromettere il secondo turno"); }
-    if (tr === "secondo turno") s += 18;
+    const tr = getTurn(form.time, settings.service);
+    if (tr === "fuori turno") { score -= 70; warnings.push("Fuori turno: richiede conferma manuale"); }
+    if (settings.service === "cena" && tr === "primo turno" && ct.resetEnd > toMin("21:00")) {
+      score -= 80;
+      warnings.push("Rischia di compromettere il secondo turno");
+    }
+    if (tr === "secondo turno") { score += 18; reasons.push("Protegge o usa il secondo turno"); }
 
     if (settings.weather === "rischio" && ["dehor", "esterno"].includes(o.area) && !o.flexibleExternal) {
-      s -= settings.risk === "basso" ? 35 : settings.risk === "medio" ? 15 : 5;
+      score -= settings.risk === "basso" ? 35 : settings.risk === "medio" ? 15 : 5;
       warnings.push("Rischio meteo");
     }
-    if (o.manual) { s -= 5; warnings.push("Conferma manuale"); }
+    if (o.manual) { score -= 5; warnings.push("Conferma manuale"); }
     if (highchairs > 0) warnings.push("Verificare spazio seggiolone");
 
-    let passaggio = "";
-    if (settings.service === "cena" && ct.resetEnd <= toMin("20:55") && tr === "primo turno") passaggio = "Possibile mini-passaggio prima del secondo turno";
-    if (settings.service === "cena" && tr === "secondo turno" && ct.start >= toMin("21:15")) passaggio = "Valutare eventuale passaggio veloce prima";
+    let passageMessage = "";
+    if (settings.service === "cena" && tr === "fuori turno") {
+      passageMessage = `Fuori turno: il tavolo sarebbe occupato fino alle ${fromMin(ct.resetEnd)}. Controllare che non rompa prenotazioni prima/dopo.`;
+    } else if (settings.service === "cena" && tr === "primo turno" && ct.resetEnd <= toMin("20:55")) {
+      passageMessage = `Possibile passaggio: tavolo pronto alle ${fromMin(ct.resetEnd)} prima del secondo turno.`;
+    } else if (settings.service === "cena" && tr === "secondo turno") {
+      passageMessage = `Secondo turno: tavolo pronto dopo cena alle ${fromMin(ct.resetEnd)}.`;
+    }
 
-    return { ...o, score: s, warnings, turn: tr, estimatedEnd: fromMin(ct.end), resetEnd: fromMin(ct.resetEnd), duration: ct.dur, passaggio };
+    return {
+      ...o,
+      score,
+      warnings,
+      reasons,
+      turn: tr,
+      estimatedEnd: fromMin(ct.end),
+      resetEnd: fromMin(ct.resetEnd),
+      duration: ct.dur,
+      passageMessage,
+      availabilityMessage: getAvailabilityMessage(o, ct.start, ct.resetEnd),
+    };
   }
 
-  const suggestions = useMemo(() => options.map(score).filter(Boolean).sort((a: any, b: any) => b.score - a.score).slice(0, 8) as ScoredOption[], [options, form, settings, activeReservations]);
+  const suggestions = useMemo(() => options.map(scoreOption).filter(Boolean).sort((a: any, b: any) => b.score - a.score).slice(0, 8) as ScoredOption[], [options, form, settings, activeReservations]);
 
-  const enriched = useMemo(() => dayReservations.map((r) => ({ ...r, resetEnd: fromMin(times(r, settings).resetEnd), estimatedEnd: fromMin(times(r, settings).end), turn: turn(r.time, settings.service) })), [dayReservations, settings]);
+  const enriched = useMemo(() => dayReservations.map((r) => ({ ...r, resetEnd: fromMin(times(r, settings).resetEnd), estimatedEnd: fromMin(times(r, settings).end), turn: getTurn(r.time, settings.service) })), [dayReservations, settings]);
 
+  const mappedReservations = enriched.filter((r) => isActiveStatus(r.status)).filter(mapFilterReservation);
   const occupied = new globalThis.Map<string, any>();
-  enriched.filter((r) => isActiveStatus(r.status)).forEach((r) => r.tableIds.forEach((id) => occupied.set(id, r)));
+  mappedReservations.forEach((r) => r.tableIds.forEach((id) => occupied.set(id, r)));
 
-  const booked = activeReservations.reduce((a, r) => a + r.adults, 0);
+  const theoreticalCapacity = tables.filter((t) => !tableDisabled(t)).reduce((a, t) => a + t.standard, 0) + (settings.weather === "pioggia" ? 0 : 30);
+  const bookedAdults = activeReservations.reduce((a, r) => a + r.adults, 0);
+  const freeSeats = Math.max(theoreticalCapacity - bookedAdults, 0);
   const firstTurn = enriched.filter((r) => r.turn === "primo turno" && isActiveStatus(r.status));
   const secondTurn = enriched.filter((r) => r.turn === "secondo turno" && isActiveStatus(r.status));
+  const firstSeats = firstTurn.reduce((a, r) => a + r.adults, 0);
+  const secondSeats = secondTurn.reduce((a, r) => a + r.adults, 0);
   const notArrived = enriched.filter((r) => r.status === "confermata");
-  const arrived = enriched.filter((r) => ["arrivato", "seduto", "in_uscita"].includes(r.status));
-  const usable = tables.filter((t) => !disabled(t)).reduce((a, t) => a + t.standard, 0) + (settings.weather === "pioggia" ? 0 : 30);
+  const inService = enriched.filter((r) => ["arrivato", "seduto", "in_uscita"].includes(r.status));
+  const visibleReservations = enriched.filter((r) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return r.name.toLowerCase().includes(q) || r.phone.toLowerCase().includes(q) || r.table.toLowerCase().includes(q);
+  });
 
-  function add(o: ScoredOption = suggestions[0]) {
+  function addReservation(o: ScoredOption = suggestions[0]) {
     if (!o) return;
     setReservations((prev) => [{
       id: Date.now(),
@@ -316,7 +373,6 @@ export default function DaDinoDashboard() {
       phone: form.phone,
       time: form.time,
       adults: Number(form.adults),
-      children: Number(form.children),
       highchairs: Number(form.highchairs),
       category: form.category,
       areaPreference: form.areaPreference,
@@ -326,11 +382,34 @@ export default function DaDinoDashboard() {
       consumption: form.consumption,
       notes: form.notes,
     }, ...prev]);
-    setForm({ name: "", phone: "", time: "21:00", adults: 2, children: 0, highchairs: 0, category: "normale", areaPreference: "nessuna", consumption: "non_so", notes: "" });
+    setForm({ name: "", phone: "", time: "21:00", adults: 2, highchairs: 0, category: "normale", areaPreference: "nessuna", consumption: "non_so", notes: "" });
+  }
+
+  function addWalkIn() {
+    const walkInForm: FormState = { ...form, name: form.name || "Walk-in", consumption: form.consumption === "non_so" ? "pinsa" : form.consumption };
+    const first = suggestions[0];
+    if (!first) return;
+    setReservations((prev) => [{
+      id: Date.now(),
+      date: selectedDate,
+      name: walkInForm.name,
+      phone: walkInForm.phone,
+      time: walkInForm.time,
+      adults: Number(walkInForm.adults),
+      highchairs: Number(walkInForm.highchairs),
+      category: walkInForm.category,
+      areaPreference: walkInForm.areaPreference,
+      table: first.label,
+      tableIds: first.tables,
+      status: "seduto",
+      consumption: walkInForm.consumption,
+      notes: walkInForm.notes || "Walk-in inserito al volo",
+      seatedAt: Date.now(),
+    }, ...prev]);
   }
 
   function updateStatus(id: number, status: Status) {
-    setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status } : r));
+    setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status, seatedAt: status === "seduto" && !r.seatedAt ? Date.now() : r.seatedAt } : r));
   }
 
   function removeReservation(id: number) {
@@ -343,15 +422,15 @@ export default function DaDinoDashboard() {
         <div className="flex justify-between gap-4 flex-col md:flex-row">
           <div>
             <h1 className="text-3xl font-bold">Da Dino · Dashboard tavoli</h1>
-            <p className="text-gray-600">Calendario, turni, arrivi, meteo, passaggio e suggerimento automatico.</p>
+            <p className="text-gray-600">Calendario, turni, arrivi, colori tavoli, passaggio e suggerimento automatico.</p>
           </div>
-          <Button className="rounded-2xl"><Plus className="w-4 h-4 mr-2" />Nuova prenotazione</Button>
+          <div className="flex gap-2"><Button className="rounded-2xl" onClick={addWalkIn}><Zap className="w-4 h-4 mr-2" />Walk-in</Button><Button className="rounded-2xl"><Plus className="w-4 h-4 mr-2" />Nuova</Button></div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Stat icon={Users} label="Coperti attivi" value={booked} />
-          <Stat icon={Clock3} label="Primo / secondo" value={`${firstTurn.reduce((a, r) => a + r.adults, 0)} / ${secondTurn.reduce((a, r) => a + r.adults, 0)}`} />
-          <Stat icon={Map} label="Posti utilizzabili" value={usable} />
+          <Stat icon={Users} label="Posti liberi stimati" value={freeSeats} />
+          <Stat icon={Clock3} label="1° / 2° turno" value={`${firstSeats} / ${secondSeats}`} />
+          <Stat icon={MapPinned} label="Capienza teorica" value={theoreticalCapacity} />
           <Stat icon={CloudRain} label="Meteo" value={settings.weather} />
           <Stat icon={BarChart3} label="Media stimata" value={`${duration("non_so", settings)} min`} />
         </div>
@@ -368,34 +447,50 @@ export default function DaDinoDashboard() {
           </CardContent>
         </Card>
 
+        <Card className="rounded-2xl">
+          <CardContent className="p-4 text-sm text-gray-600 grid md:grid-cols-3 gap-3">
+            <div><b>Legenda parametri</b><br />Servizio = pranzo/cena. Meteo = disattiva esterno se piove. Rischio = quanto spingere dehor/esterno con meteo incerto.</div>
+            <div><b>Legenda colori tavoli</b><br /><span className="text-green-700 font-semibold">Verde</span> libero · <span className="text-red-700 font-semibold">Rosso</span> occupato/prenotato · <span className="text-gray-700 font-semibold">Grigio</span> non utilizzabile.</div>
+            <div><b>Legenda form</b><br />Adulti = coperti adulti. Seggioloni = bambini piccoli in seggiolone. Consumo modifica la durata del tavolo.</div>
+          </CardContent>
+        </Card>
+
         {settings.weather === "pioggia" && <div className="bg-white border rounded-2xl p-4 flex gap-3"><AlertTriangle />Modalità pioggia: esterno e marciapiede disattivati, dehor con tende chiuse.</div>}
         {settings.weather === "rischio" && <div className="bg-white border rounded-2xl p-4 flex gap-3"><ShieldAlert />Rischio pioggia: esterno/dehor penalizzati in base al rischio accettato.</div>}
 
-        <div className="grid xl:grid-cols-[350px_1fr_390px] gap-5">
+        <div className="grid xl:grid-cols-[350px_1fr_410px] gap-5">
           <Card className="rounded-2xl">
             <CardContent className="p-4 space-y-3">
               <h2 className="text-xl font-bold">Inserisci prenotazione</h2>
               <input className="w-full border rounded-xl p-3" placeholder="Nome cliente" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               <input className="w-full border rounded-xl p-3" placeholder="Telefono" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-              <div className="grid grid-cols-2 gap-2"><input className="border rounded-xl p-3" type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /><input className="border rounded-xl p-3" type="number" min="1" value={form.adults} onChange={(e) => setForm({ ...form, adults: Number(e.target.value) })} /></div>
-              <div className="grid grid-cols-2 gap-2"><input className="border rounded-xl p-3" type="number" min="0" placeholder="Bambini" value={form.children} onChange={(e) => setForm({ ...form, children: Number(e.target.value) })} /><input className="border rounded-xl p-3" type="number" min="0" placeholder="Seggioloni" value={form.highchairs} onChange={(e) => setForm({ ...form, highchairs: Number(e.target.value) })} /></div>
-              <div className="grid grid-cols-2 gap-2"><select className="border rounded-xl p-3" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as Category })}><option value="normale">Normale</option><option value="affezionato">Affezionato</option><option value="molto_importante">Molto importante</option></select><select className="border rounded-xl p-3" value={form.areaPreference} onChange={(e) => setForm({ ...form, areaPreference: e.target.value as any })}><option value="nessuna">Nessuna pref.</option><option value="sala">Sala</option><option value="saletta">Saletta</option><option value="dehor">Dehor</option><option value="esterno">Esterno</option></select></div>
-              <select className="border rounded-xl p-3 w-full" value={form.consumption} onChange={(e) => setForm({ ...form, consumption: e.target.value as Consumption })}><option value="non_so">Consumo non so</option><option value="pinsa">Pinsa</option><option value="cucina">Cucina</option><option value="misto">Misto</option></select>
+              <div className="grid grid-cols-2 gap-2"><label className="text-sm"><span className="text-gray-500">Orario</span><input className="border rounded-xl p-3 w-full" type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /></label><label className="text-sm"><span className="text-gray-500">Adulti</span><input className="border rounded-xl p-3 w-full" type="number" min="1" value={form.adults} onChange={(e) => setForm({ ...form, adults: Number(e.target.value) })} /></label></div>
+              <label className="text-sm"><span className="text-gray-500">Seggioloni</span><input className="border rounded-xl p-3 w-full" type="number" min="0" value={form.highchairs} onChange={(e) => setForm({ ...form, highchairs: Number(e.target.value) })} /></label>
+              <div className="grid grid-cols-2 gap-2"><label className="text-sm"><span className="text-gray-500">Cliente</span><select className="border rounded-xl p-3 w-full" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as Category })}><option value="normale">Normale</option><option value="affezionato">Affezionato</option><option value="molto_importante">VIP</option></select></label><label className="text-sm"><span className="text-gray-500">Preferenza area</span><select className="border rounded-xl p-3 w-full" value={form.areaPreference} onChange={(e) => setForm({ ...form, areaPreference: e.target.value as any })}><option value="nessuna">Nessuna</option><option value="sala">Sala</option><option value="saletta">Saletta</option><option value="dehor">Dehor</option><option value="esterno">Esterno</option></select></label></div>
+              <label className="text-sm"><span className="text-gray-500">Consumo previsto</span><select className="border rounded-xl p-3 w-full" value={form.consumption} onChange={(e) => setForm({ ...form, consumption: e.target.value as Consumption })}><option value="non_so">Non so</option><option value="pinsa">Pinsa</option><option value="cucina">Cucina</option><option value="misto">Misto</option></select></label>
               <textarea className="border rounded-xl p-3 w-full" placeholder="Note" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-              <Button className="w-full rounded-2xl" disabled={!suggestions[0]} onClick={() => add()}><CheckCircle2 className="w-4 h-4 mr-2" />Conferma migliore opzione</Button>
+              <Button className="w-full rounded-2xl" disabled={!suggestions[0]} onClick={() => addReservation()}><CheckCircle2 className="w-4 h-4 mr-2" />Conferma migliore opzione</Button>
             </CardContent>
           </Card>
 
           <Card className="rounded-2xl">
             <CardContent className="p-4">
-              <div className="flex justify-between mb-4 gap-3 flex-col md:flex-row"><div><h2 className="text-xl font-bold">Mappa tavoli</h2><p className="text-sm text-gray-500">Area selezionata: {area}</p></div><div className="flex gap-2 flex-wrap">{AREAS.map((a) => <Button key={a} variant={area === a ? "default" : "outline"} className="rounded-xl" onClick={() => setArea(a)}>{a}</Button>)}</div></div>
-              {area === "esterno" ? <div className="border rounded-2xl p-4 bg-white"><b>Esterno modulabile</b><p className="text-sm text-gray-600 mt-1">30 posti adulti componibili liberamente. Con bambini può superare 30, ma richiede controllo manuale.</p></div> : <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">{tables.filter((t) => t.area === area).map((t) => <div key={t.id} className={`border rounded-2xl p-3 min-h-[100px] ${disabled(t) ? "opacity-40 bg-gray-100" : occupied.get(t.id) ? "bg-gray-900 text-white" : "bg-white"}`}><div className="flex justify-between"><b>{t.label}</b><span className="text-xs">{t.standard}/{t.max}</span></div><div className="text-xs mt-2 opacity-75">{occupied.get(t.id) ? `${occupied.get(t.id).name} · pronto ${occupied.get(t.id).resetEnd}` : t.notes}</div></div>)}</div>}
+              <div className="flex justify-between mb-4 gap-3 flex-col md:flex-row">
+                <div><h2 className="text-xl font-bold">Mappa tavoli</h2><p className="text-sm text-gray-500">Area: {area} · Vista: {mapTurn}</p></div>
+                <div className="flex gap-2 flex-wrap">{AREAS.map((a) => <Button key={a} variant={area === a ? "default" : "outline"} className="rounded-xl" onClick={() => setArea(a)}>{a}</Button>)}</div>
+              </div>
+              <div className="flex gap-2 mb-4"><Button variant={mapTurn === "tutto" ? "default" : "outline"} onClick={() => setMapTurn("tutto")}>Tutto</Button><Button variant={mapTurn === "primo" ? "default" : "outline"} onClick={() => setMapTurn("primo")}>1° turno</Button><Button variant={mapTurn === "secondo" ? "default" : "outline"} onClick={() => setMapTurn("secondo")}>2° turno</Button></div>
+              {area === "esterno" ? <div className="border rounded-2xl p-4 bg-green-50 border-green-200"><b>Esterno modulabile</b><p className="text-sm text-gray-600 mt-1">30 posti adulti componibili. Se piove non utilizzabile. Con rischio pioggia viene penalizzato nei suggerimenti.</p></div> : <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">{tables.filter((t) => t.area === area).map((t) => {
+                const occ = occupied.get(t.id);
+                const className = tableDisabled(t) ? "bg-gray-200 text-gray-500 border-gray-300" : occ ? "bg-red-100 border-red-300 text-red-950" : "bg-green-100 border-green-300 text-green-950";
+                return <div key={t.id} className={`border rounded-2xl p-3 min-h-[110px] ${className}`}><div className="flex justify-between"><b>{t.label}</b><span className="text-xs">{t.standard}/{t.max}</span></div><div className="text-xs mt-2 opacity-80">{occ ? `${occ.name} · ${occ.time} · pronto ${occ.resetEnd}` : tableDisabled(t) ? "Non utilizzabile" : t.notes}</div></div>;
+              })}</div>}
             </CardContent>
           </Card>
 
           <div className="space-y-5">
-            <Card className="rounded-2xl"><CardContent className="p-4 space-y-3"><h2 className="text-xl font-bold flex gap-2"><Search />Suggerimenti</h2>{suggestions.map((s) => <div className="border rounded-2xl p-3 bg-white" key={s.id}><div className="flex justify-between gap-2"><div><b>{s.label}</b><div className="text-xs text-gray-500">{s.area} · {s.standard}/{s.max} · score {Math.round(s.score)}</div><div className="text-xs text-gray-500">{s.turn} · fine {s.estimatedEnd} · pronto {s.resetEnd}</div></div><Button size="sm" variant="outline" onClick={() => add(s)}>Scegli</Button></div><p className="text-xs text-gray-600 mt-2">{s.notes}</p>{s.passaggio && <div className="text-xs mt-2 font-medium">{s.passaggio}</div>}<div className="flex flex-wrap gap-1 mt-2">{s.warnings.map((w) => <span className="text-[11px] bg-gray-100 rounded-full px-2 py-1" key={w}>{w}</span>)}</div></div>)}</CardContent></Card>
-            <Card className="rounded-2xl"><CardContent className="p-4"><h2 className="text-xl font-bold">Arrivi</h2><p className="text-sm text-gray-500">Da arrivare: {notArrived.length} · In sala: {arrived.length}</p></CardContent></Card>
+            <Card className="rounded-2xl"><CardContent className="p-4 space-y-3"><h2 className="text-xl font-bold flex gap-2"><Search />Suggerimenti</h2>{suggestions.map((s) => <div className="border rounded-2xl p-3 bg-white" key={s.id}><div className="flex justify-between gap-2"><div><b>{s.label}</b><div className="text-xs text-gray-500">{s.area} · {s.standard}/{s.max} · score {Math.round(s.score)}</div><div className="text-xs text-gray-500">{s.turn} · fine {s.estimatedEnd} · pronto {s.resetEnd}</div></div><Button size="sm" variant="outline" onClick={() => addReservation(s)}>Scegli</Button></div><p className="text-xs text-gray-600 mt-2">{s.notes}</p><div className="text-xs mt-2 font-medium">{s.availabilityMessage}</div>{s.passageMessage && <div className="text-xs mt-1 font-medium text-blue-700">{s.passageMessage}</div>}<div className="flex flex-wrap gap-1 mt-2">{s.reasons.map((w) => <span className="text-[11px] bg-green-100 rounded-full px-2 py-1" key={w}>{w}</span>)}{s.warnings.map((w) => <span className="text-[11px] bg-gray-100 rounded-full px-2 py-1" key={w}>{w}</span>)}</div></div>)}</CardContent></Card>
+            <Card className="rounded-2xl"><CardContent className="p-4"><h2 className="text-xl font-bold">Live servizio</h2><p className="text-sm text-gray-500">Da arrivare: {notArrived.length} · In servizio: {inService.length}</p><p className="text-sm text-gray-500">Usa i bottoni Arrivato/Seduto/Pagato/Liberato per aggiornare la sala.</p></CardContent></Card>
           </div>
         </div>
 
@@ -403,26 +498,27 @@ export default function DaDinoDashboard() {
           <ReservationList title="Primo turno" data={firstTurn} updateStatus={updateStatus} removeReservation={removeReservation} />
           <ReservationList title="Secondo turno" data={secondTurn} updateStatus={updateStatus} removeReservation={removeReservation} />
         </div>
-        <ReservationList title="Tutte le prenotazioni del giorno" data={enriched} updateStatus={updateStatus} removeReservation={removeReservation} />
+
+        <Card className="rounded-2xl"><CardContent className="p-4"><div className="flex flex-col md:flex-row justify-between gap-3 mb-3"><h2 className="text-xl font-bold">Tutte le prenotazioni del giorno</h2><input className="border rounded-xl p-2" placeholder="Cerca nome, telefono, tavolo" value={search} onChange={(e) => setSearch(e.target.value)} /></div><ReservationTable data={visibleReservations} updateStatus={updateStatus} removeReservation={removeReservation} /></CardContent></Card>
       </div>
     </div>
   );
 }
 
 function ReservationList({ title, data, updateStatus, removeReservation }: { title: string; data: any[]; updateStatus: (id: number, status: Status) => void; removeReservation: (id: number) => void }) {
+  return <Card className="rounded-2xl"><CardContent className="p-4"><h2 className="text-xl font-bold flex gap-2 mb-3"><Utensils />{title}</h2><ReservationTable data={data} updateStatus={updateStatus} removeReservation={removeReservation} /></CardContent></Card>;
+}
+
+function ReservationTable({ data, updateStatus, removeReservation }: { data: any[]; updateStatus: (id: number, status: Status) => void; removeReservation: (id: number) => void }) {
   return (
-    <Card className="rounded-2xl">
-      <CardContent className="p-4">
-        <h2 className="text-xl font-bold flex gap-2 mb-3"><Utensils />{title}</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <tbody>
-              {data.length === 0 && <tr><td className="py-3 text-gray-500">Nessuna prenotazione</td></tr>}
-              {data.map((r) => <tr key={r.id} className="border-b align-top"><td className="py-2 font-medium">{r.time}</td><td>{r.name}<div className="text-xs text-gray-500">{r.phone}</div></td><td>{r.adults}{r.children ? ` + ${r.children} b.` : ""}{r.highchairs ? ` + ${r.highchairs} seg.` : ""}</td><td>{r.table}<div className="text-xs text-gray-500">{r.estimatedEnd}/{r.resetEnd}</div></td><td>{r.status}</td><td className="space-x-1 whitespace-nowrap"><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "arrivato")}>Arrivato</Button><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "seduto")}>Seduto</Button><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "liberato")}>Liberato</Button><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "no_show")}>No-show</Button><Button size="sm" variant="outline" onClick={() => removeReservation(r.id)}><Trash2 className="w-4 h-4" /></Button></td></tr>)}
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <tbody>
+          {data.length === 0 && <tr><td className="py-3 text-gray-500">Nessuna prenotazione</td></tr>}
+          {data.map((r) => <tr key={r.id} className="border-b align-top"><td className="py-2 font-medium">{r.time}</td><td>{r.name}<div className="text-xs text-gray-500">{r.phone}</div></td><td>{r.adults}{r.highchairs ? ` + ${r.highchairs} seg.` : ""}</td><td>{r.table}<div className="text-xs text-gray-500">{r.estimatedEnd}/{r.resetEnd}</div></td><td><span className={`text-xs px-2 py-1 rounded-full ${statusColor(r.status)}`}>{r.status}</span></td><td className="space-x-1 whitespace-nowrap"><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "arrivato")}>Arrivato</Button><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "seduto")}>Seduto</Button><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "pagato")}>Pagato</Button><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "liberato")}>Liberato</Button><Button size="sm" variant="outline" onClick={() => updateStatus(r.id, "no_show")}>No-show</Button><Button size="sm" variant="outline" onClick={() => removeReservation(r.id)}><Trash2 className="w-4 h-4" /></Button></td></tr>)}
+        </tbody>
+      </table>
+    </div>
   );
 }
+
