@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";;
 import { AlertTriangle, BarChart3, CheckCircle2, Clock3, CloudRain, MapPinned, Search, Trash2, Users, Utensils, Zap } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { saveReservations, loadReservations } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 
 type Area = "sala" | "saletta" | "dehor" | "marciapiede" | "esterno";
@@ -95,8 +96,23 @@ const [mapTurn,setMapTurn]=useState<MapTurn>("tutto");
 const [search,setSearch]=useState("");
 const [bookingMode,setBookingMode]=useState<BookingMode>("prenotazione");
 const [reservations,setReservations]=useState<Reservation[]>([]);
+const [loadedFromCloud,setLoadedFromCloud]=useState(false);  
 const [customers,setCustomers]=useState<Customer[]>([]);
 const [form,setForm]=useState<FormState>({name:"",phone:"",time:"21:00",adults:2,highchairs:0,category:"normale",areaPreference:"nessuna",consumption:"non_so",notes:""});
+useEffect(() => {
+  async function loadCloudData() {
+    const data = await loadReservations();
+    setReservations(data);
+    setLoadedFromCloud(true);
+  }
+
+  loadCloudData();
+}, []);
+
+useEffect(() => {
+  if (!loadedFromCloud) return;
+  saveReservations(reservations);
+}, [reservations, loadedFromCloud]);
 const dayReservations=useMemo(()=>reservations.filter(r=>r.date===selectedDate),[reservations,selectedDate]);
 const activeReservations=useMemo(()=>dayReservations.filter(r=>isActiveStatus(r.status)),[dayReservations]);
 const enriched=useMemo(()=>dayReservations.map(r=>({...r,turn:getTurn(r.time,settings.service),estimatedEnd:fromMin(times(r,settings).end),resetEnd:fromMin(times(r,settings).resetEnd)})),[dayReservations,settings]);
