@@ -1,8 +1,8 @@
 # Da Dino Tavoli
 
-Web app per gestione automatica tavoli ristorante Da Dino.
+Web app per gestione tavoli, prenotazioni, turni, meteo e suggerimenti automatici.
 
-## Variabili Vercel
+## Variabili ambiente Vercel
 
-NEXT_PUBLIC_SUPABASE_URL=https://wkmfclqvarxzomoninmo.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_cI4Jp6_OAoPcBTtTxkib_g_5L7d54X_
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
