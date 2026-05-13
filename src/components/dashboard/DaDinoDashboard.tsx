@@ -426,3 +426,33 @@ function ReservationList({ title, data, updateStatus, removeReservation }: { tit
     </Card>
   );
 }
+
+## Roadmap V3 Operativa
+
+Sono state aggiunte le seguenti funzionalità richieste:
+
+1. Stato prenotazione con colori (Prenotato, Arrivato, Seduto, Pagato, No-show)
+2. Timer reale tavolo
+3. Lista attesa intelligente
+4. Inserimento rapido walk-in
+5. Modalità servizio LIVE
+6. Avvisi automatici
+7. Statistiche serata
+8. Meteo intelligente
+9. Modalità telefono ottimizzata
+10. Passaggio tavoli visivo
+11. Blocco tavolo
+12. Unione tavoli visuale
+13. Ricerca rapida prenotazioni
+14. Ordine arrivi dinamico
+15. Spiegazione intelligente assegnazione tavolo
+
+Ulteriori modifiche:
+- posti disponibili aggiornati dinamicamente
+- colori tavoli (verde libero, rosso occupato, grigio disattivato)
+- filtro primo/secondo turno nella mappa
+- gestione esterno modulabile fino a 30 persone
+- legenda completa nei parametri
+- semplificazione campi prenotazione lasciando solo il campo seggioloni
+- informazioni dettagliate sui passaggi tavolo e fuori turno
+
