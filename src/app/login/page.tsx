@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/auth";
+import { supabase, getCurrentUserRole } from "@/lib/auth";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("matteo@dadino.local");
@@ -21,7 +21,15 @@ export default function LoginPage() {
       return;
     }
 
-    window.location.href = "/dashboard";
+    const role = await getCurrentUserRole();
+
+    if (role === "admin") {
+      window.location.href = "/dashboard";
+    } else if (role === "telefonista") {
+      window.location.href = "/prenotazioni";
+    } else {
+      window.location.href = "/servizio";
+    }
   }
 
   return (
@@ -59,4 +67,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
