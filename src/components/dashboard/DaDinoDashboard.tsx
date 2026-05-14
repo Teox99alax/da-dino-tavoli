@@ -47,44 +47,112 @@ const modules:TableModule[]=[
 ...[11,12,13,14,15].map(n=>({id:`marciapiede-${n}`,area:"marciapiede" as Area,label:`${n} marciapiede`,seats:2,size:"70x70" as const,strategicGroup:"marciapiede",canHeadSeat:true}))
 ];
 
-const options:TableOption[]=[
-{id:"sala-1",label:"1 sala",area:"sala",moduleIds:["sala-1a","sala-1b"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"normale",strategicCost:4,preservesLargeTables:3,notes:"4 comodo, 5 capotavola"},
-{id:"sala-1-2",label:"1+2 sala",area:"sala",moduleIds:["sala-1a","sala-1b","sala-2"],standardSeats:6,maxAdults:7,maxWithHighchairs:7,comfort:"stretto",strategicCost:8,preservesLargeTables:1,manual:true,notes:"6/7, usa parte della tavolata grande"},
-{id:"sala-3",label:"3 sala",area:"sala",moduleIds:["sala-3"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:4,notes:"Tavolo piccolo sala"},
-{id:"sala-4",label:"4 sala",area:"sala",moduleIds:["sala-4"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:4,notes:"Tavolo piccolo sala"},
-{id:"sala-3-4",label:"3+4 sala",area:"sala",moduleIds:["sala-3","sala-4"],standardSeats:4,maxAdults:5,maxWithHighchairs:6,comfort:"normale",strategicCost:4,preservesLargeTables:2,notes:"4/5, possibile 5+1 con vincoli"},
-{id:"sala-1-2-3",label:"1+2+3 sala",area:"sala",moduleIds:["sala-1a","sala-1b","sala-2","sala-3"],standardSeats:8,maxAdults:9,maxWithHighchairs:9,comfort:"stretto",strategicCost:12,preservesLargeTables:0,manual:true,notes:"Tavolata parziale"},
-{id:"sala-1-2-3-4",label:"1+2+3+4 sala",area:"sala",moduleIds:["sala-1a","sala-1b","sala-2","sala-3","sala-4"],standardSeats:12,maxAdults:13,maxWithHighchairs:13,comfort:"stretto",strategicCost:18,preservesLargeTables:0,manual:true,notes:"Tavolata grande sala 12/13"},
-{id:"sala-5",label:"5 sala",area:"sala",moduleIds:["sala-5a","sala-5b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"comodo",strategicCost:3,preservesLargeTables:3,notes:"4 comodo"},
-{id:"sala-6",label:"6 sala",area:"sala",moduleIds:["sala-6a","sala-6b","sala-6c"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"comodo",strategicCost:5,preservesLargeTables:2,notes:"6 adulti, seggiolone possibile"},
-{id:"sala-5-6",label:"5+6 sala",area:"sala",moduleIds:["sala-5a","sala-5b","sala-6a","sala-6b","sala-6c"],standardSeats:10,maxAdults:10,maxWithHighchairs:11,comfort:"normale",strategicCost:14,preservesLargeTables:0,manual:true,notes:"10 o 10+1 seggiolone"},
-{id:"saletta-1",label:"1 saletta",area:"saletta",moduleIds:["saletta-1a","saletta-1b"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"stretto",strategicCost:3,preservesLargeTables:3,notes:"4, 5 stretto"},
-{id:"saletta-2",label:"2 saletta",area:"saletta",moduleIds:["saletta-2a","saletta-2b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"normale",strategicCost:4,preservesLargeTables:2,notes:"4"},
-{id:"saletta-3",label:"3 saletta",area:"saletta",moduleIds:["saletta-3a","saletta-3b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"normale",strategicCost:4,preservesLargeTables:2,notes:"4"},
-{id:"saletta-4",label:"4 saletta",area:"saletta",moduleIds:["saletta-4a","saletta-4b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"normale",strategicCost:3,preservesLargeTables:3,notes:"4"},
-{id:"saletta-2-3",label:"2+3 saletta",area:"saletta",moduleIds:["saletta-2a","saletta-2b","saletta-3a","saletta-3b"],standardSeats:8,maxAdults:9,maxWithHighchairs:9,comfort:"stretto",strategicCost:10,preservesLargeTables:0,manual:true,notes:"8/9 oppure 6+2 manuale"},
-{id:"esterno-A-12",label:"Esterno 1+2",area:"esterno",moduleIds:["esterno-1","esterno-2"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"comodo",strategicCost:3,preservesLargeTables:4,notes:"4/5 con capotavola"},
-{id:"esterno-A-34",label:"Esterno 3+4",area:"esterno",moduleIds:["esterno-3","esterno-4"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"comodo",strategicCost:3,preservesLargeTables:4,notes:"4/5 con capotavola"},
-{id:"esterno-A-123",label:"Esterno 1+2+3",area:"esterno",moduleIds:["esterno-1","esterno-2","esterno-3"],standardSeats:6,maxAdults:7,maxWithHighchairs:7,comfort:"normale",strategicCost:8,preservesLargeTables:2,notes:"6/7"},
-{id:"esterno-A-1234",label:"Esterno 1+2+3+4",area:"esterno",moduleIds:["esterno-1","esterno-2","esterno-3","esterno-4"],standardSeats:8,maxAdults:9,maxWithHighchairs:9,comfort:"normale",strategicCost:12,preservesLargeTables:1,notes:"9 con capotavola"},
-{id:"esterno-A-12345",label:"Esterno 1+2+3+4+5",area:"esterno",moduleIds:["esterno-1","esterno-2","esterno-3","esterno-4","esterno-5"],standardSeats:10,maxAdults:12,maxWithHighchairs:12,comfort:"normale",strategicCost:16,preservesLargeTables:0,manual:true,notes:"11/12 con capotavola"},
-{id:"esterno-B-67",label:"Esterno 6+7",area:"esterno",moduleIds:["esterno-6","esterno-7"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
-{id:"esterno-B-89",label:"Esterno 8+9",area:"esterno",moduleIds:["esterno-8","esterno-9"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
-{id:"esterno-B-6789",label:"Esterno 6+7+8+9",area:"esterno",moduleIds:["esterno-6","esterno-7","esterno-8","esterno-9"],standardSeats:8,maxAdults:10,maxWithHighchairs:10,comfort:"normale",strategicCost:8,preservesLargeTables:2,notes:"8/10 esterno"},
-{id:"esterno-B-678910",label:"Esterno 6+7+8+9+10",area:"esterno",moduleIds:["esterno-6","esterno-7","esterno-8","esterno-9","esterno-10"],standardSeats:10,maxAdults:12,maxWithHighchairs:12,comfort:"normale",strategicCost:12,preservesLargeTables:0,manual:true,notes:"10/12 esterno"},
-{id:"esterno-C-1112",label:"Esterno 11+12",area:"esterno",moduleIds:["esterno-11","esterno-12"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
-{id:"esterno-C-1314",label:"Esterno 13+14",area:"esterno",moduleIds:["esterno-13","esterno-14"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
-{id:"esterno-C-11121314",label:"Esterno 11+12+13+14",area:"esterno",moduleIds:["esterno-11","esterno-12","esterno-13","esterno-14"],standardSeats:8,maxAdults:10,maxWithHighchairs:10,comfort:"normale",strategicCost:8,preservesLargeTables:2,notes:"8/10 esterno"},
-{id:"esterno-C-1112131415",label:"Esterno 11+12+13+14+15",area:"esterno",moduleIds:["esterno-11","esterno-12","esterno-13","esterno-14","esterno-15"],standardSeats:10,maxAdults:12,maxWithHighchairs:12,comfort:"normale",strategicCost:12,preservesLargeTables:0,manual:true,notes:"10/12 esterno"},
-...[11,12,13,14,15].map(n=>({id:`marciapiede-${n}`,label:`${n} marciapiede`,area:"marciapiede" as Area,moduleIds:[`marciapiede-${n}`],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale" as const,strategicCost:1,preservesLargeTables:6,notes:"2 o 2+1 seggiolone"})),
-{id:"dehor-1-6",label:"1+6 dehor",area:"dehor",moduleIds:["dehor-1","dehor-6a","dehor-6b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
-{id:"dehor-2-5",label:"2+5 dehor",area:"dehor",moduleIds:["dehor-2","dehor-5a","dehor-5b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
-{id:"dehor-3-4",label:"3+4 dehor",area:"dehor",moduleIds:["dehor-3","dehor-4a","dehor-4b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
-{id:"dehor-8-9",label:"8+9 dehor",area:"dehor",moduleIds:["dehor-8a","dehor-8b","dehor-9"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
-{id:"dehor-10-7",label:"10+7 dehor",area:"dehor",moduleIds:["dehor-10","dehor-7a","dehor-7b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
-{id:"dehor-2-5-extra",label:"2+5 dehor + extra",area:"dehor",moduleIds:["dehor-2","dehor-5a","dehor-5b","dehor-10"],standardSeats:8,maxAdults:8,maxWithHighchairs:8,comfort:"stretto",strategicCost:10,preservesLargeTables:1,requiresOpenAwning:true,takesExtraDehor2:true,manual:true,notes:"8 solo tende aperte"},
-{id:"dehor-3-4-extra",label:"3+4 dehor + extra",area:"dehor",moduleIds:["dehor-3","dehor-4a","dehor-4b","dehor-1"],standardSeats:8,maxAdults:8,maxWithHighchairs:8,comfort:"stretto",strategicCost:10,preservesLargeTables:1,requiresOpenAwning:true,takesExtraDehor2:true,manual:true,notes:"8 solo tende aperte"},
-{id:"dehor-8-9-extra",label:"8+9 dehor + extra",area:"dehor",moduleIds:["dehor-8a","dehor-8b","dehor-9","dehor-2"],standardSeats:8,maxAdults:8,maxWithHighchairs:8,comfort:"stretto",strategicCost:10,preservesLargeTables:1,requiresOpenAwning:true,takesExtraDehor2:true,manual:true,notes:"8 solo tende aperte"}
+const options: TableOption[] = [
+  {id:"sala-1",label:"1 sala",area:"sala",moduleIds:["sala-1a","sala-1b"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"normale",strategicCost:4,preservesLargeTables:3,notes:"4 comodo, 5 capotavola"},
+  {id:"sala-2",label:"2 sala",area:"sala",moduleIds:["sala-2"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:4,manual:true,notes:"Tavolo 2 sala usabile singolo"},
+  {id:"sala-1-2",label:"1+2 sala",area:"sala",moduleIds:["sala-1a","sala-1b","sala-2"],standardSeats:6,maxAdults:7,maxWithHighchairs:7,comfort:"stretto",strategicCost:8,preservesLargeTables:1,manual:true,notes:"6/7, usa parte della tavolata grande"},
+
+  {id:"sala-3",label:"3 sala",area:"sala",moduleIds:["sala-3"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:4,notes:"Tavolo piccolo sala"},
+  {id:"sala-4",label:"4 sala",area:"sala",moduleIds:["sala-4"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:4,notes:"Tavolo piccolo sala"},
+  {id:"sala-3-4",label:"3+4 sala",area:"sala",moduleIds:["sala-3","sala-4"],standardSeats:4,maxAdults:5,maxWithHighchairs:6,comfort:"normale",strategicCost:4,preservesLargeTables:2,notes:"4/5, possibile 5+1 con vincoli"},
+
+  {id:"sala-1-2-3",label:"1+2+3 sala",area:"sala",moduleIds:["sala-1a","sala-1b","sala-2","sala-3"],standardSeats:8,maxAdults:9,maxWithHighchairs:9,comfort:"stretto",strategicCost:12,preservesLargeTables:0,manual:true,notes:"Tavolata parziale"},
+  {id:"sala-1-2-3-4",label:"1+2+3+4 sala",area:"sala",moduleIds:["sala-1a","sala-1b","sala-2","sala-3","sala-4"],standardSeats:12,maxAdults:13,maxWithHighchairs:13,comfort:"stretto",strategicCost:18,preservesLargeTables:0,manual:true,notes:"Tavolata grande sala 12/13"},
+
+  {id:"sala-5",label:"5 sala",area:"sala",moduleIds:["sala-5a","sala-5b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"comodo",strategicCost:3,preservesLargeTables:3,notes:"4 comodo"},
+  {id:"sala-5a",label:"5A sala",area:"sala",moduleIds:["sala-5a"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 5 sala usabile singolo"},
+  {id:"sala-5b",label:"5B sala",area:"sala",moduleIds:["sala-5b"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 5 sala usabile singolo"},
+
+  {id:"sala-6",label:"6 sala",area:"sala",moduleIds:["sala-6a","sala-6b","sala-6c"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"comodo",strategicCost:5,preservesLargeTables:2,notes:"6 adulti, seggiolone possibile"},
+  {id:"sala-6a",label:"6A sala",area:"sala",moduleIds:["sala-6a"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Modulo singolo tavolo 6 sala"},
+  {id:"sala-6b",label:"6B sala",area:"sala",moduleIds:["sala-6b"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Modulo singolo tavolo 6 sala"},
+  {id:"sala-6c",label:"6C sala",area:"sala",moduleIds:["sala-6c"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Modulo singolo tavolo 6 sala"},
+
+  {id:"sala-5-6",label:"5+6 sala",area:"sala",moduleIds:["sala-5a","sala-5b","sala-6a","sala-6b","sala-6c"],standardSeats:10,maxAdults:10,maxWithHighchairs:11,comfort:"normale",strategicCost:14,preservesLargeTables:0,manual:true,notes:"10 o 10+1 seggiolone"},
+
+  {id:"saletta-1",label:"1 saletta",area:"saletta",moduleIds:["saletta-1a","saletta-1b"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"stretto",strategicCost:3,preservesLargeTables:3,notes:"4, 5 stretto"},
+  {id:"saletta-1a",label:"1A saletta",area:"saletta",moduleIds:["saletta-1a"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 1 saletta usabile singolo"},
+  {id:"saletta-1b",label:"1B saletta",area:"saletta",moduleIds:["saletta-1b"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 1 saletta usabile singolo"},
+
+  {id:"saletta-2",label:"2 saletta",area:"saletta",moduleIds:["saletta-2a","saletta-2b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"normale",strategicCost:4,preservesLargeTables:2,notes:"4"},
+  {id:"saletta-2a",label:"2A saletta",area:"saletta",moduleIds:["saletta-2a"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 2 saletta usabile singolo"},
+  {id:"saletta-2b",label:"2B saletta",area:"saletta",moduleIds:["saletta-2b"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 2 saletta usabile singolo"},
+
+  {id:"saletta-3",label:"3 saletta",area:"saletta",moduleIds:["saletta-3a","saletta-3b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"normale",strategicCost:4,preservesLargeTables:2,notes:"4"},
+  {id:"saletta-3a",label:"3A saletta",area:"saletta",moduleIds:["saletta-3a"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 3 saletta usabile singolo"},
+  {id:"saletta-3b",label:"3B saletta",area:"saletta",moduleIds:["saletta-3b"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 3 saletta usabile singolo"},
+
+  {id:"saletta-4",label:"4 saletta",area:"saletta",moduleIds:["saletta-4a","saletta-4b"],standardSeats:4,maxAdults:4,maxWithHighchairs:4,comfort:"normale",strategicCost:3,preservesLargeTables:3,notes:"4"},
+  {id:"saletta-4a",label:"4A saletta",area:"saletta",moduleIds:["saletta-4a"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 4 saletta usabile singolo"},
+  {id:"saletta-4b",label:"4B saletta",area:"saletta",moduleIds:["saletta-4b"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:5,manual:true,notes:"Mezzo tavolo 4 saletta usabile singolo"},
+
+  {id:"saletta-2-3",label:"2+3 saletta",area:"saletta",moduleIds:["saletta-2a","saletta-2b","saletta-3a","saletta-3b"],standardSeats:8,maxAdults:9,maxWithHighchairs:9,comfort:"stretto",strategicCost:10,preservesLargeTables:0,manual:true,notes:"8/9 oppure 6+2 manuale"},
+
+  ...[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map(n=>({
+    id:`esterno-${n}`,
+    label:`${n} esterno`,
+    area:"esterno" as Area,
+    moduleIds:[`esterno-${n}`],
+    standardSeats:2,
+    maxAdults:2,
+    maxWithHighchairs:3,
+    comfort:"normale" as const,
+    strategicCost:1,
+    preservesLargeTables:6,
+    manual:true,
+    notes:"Tavolo esterno singolo separabile"
+  })),
+
+  {id:"esterno-A-12",label:"Esterno 1+2",area:"esterno",moduleIds:["esterno-1","esterno-2"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"comodo",strategicCost:3,preservesLargeTables:4,notes:"4/5 con capotavola"},
+  {id:"esterno-A-34",label:"Esterno 3+4",area:"esterno",moduleIds:["esterno-3","esterno-4"],standardSeats:4,maxAdults:5,maxWithHighchairs:5,comfort:"comodo",strategicCost:3,preservesLargeTables:4,notes:"4/5 con capotavola"},
+  {id:"esterno-A-123",label:"Esterno 1+2+3",area:"esterno",moduleIds:["esterno-1","esterno-2","esterno-3"],standardSeats:6,maxAdults:7,maxWithHighchairs:7,comfort:"normale",strategicCost:8,preservesLargeTables:2,notes:"6/7"},
+  {id:"esterno-A-1234",label:"Esterno 1+2+3+4",area:"esterno",moduleIds:["esterno-1","esterno-2","esterno-3","esterno-4"],standardSeats:8,maxAdults:9,maxWithHighchairs:9,comfort:"normale",strategicCost:12,preservesLargeTables:1,notes:"9 con capotavola"},
+  {id:"esterno-A-12345",label:"Esterno 1+2+3+4+5",area:"esterno",moduleIds:["esterno-1","esterno-2","esterno-3","esterno-4","esterno-5"],standardSeats:10,maxAdults:12,maxWithHighchairs:12,comfort:"normale",strategicCost:16,preservesLargeTables:0,manual:true,notes:"11/12 con capotavola"},
+
+  {id:"esterno-B-67",label:"Esterno 6+7",area:"esterno",moduleIds:["esterno-6","esterno-7"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
+  {id:"esterno-B-89",label:"Esterno 8+9",area:"esterno",moduleIds:["esterno-8","esterno-9"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
+  {id:"esterno-B-6789",label:"Esterno 6+7+8+9",area:"esterno",moduleIds:["esterno-6","esterno-7","esterno-8","esterno-9"],standardSeats:8,maxAdults:10,maxWithHighchairs:10,comfort:"normale",strategicCost:8,preservesLargeTables:2,notes:"8/10 esterno"},
+  {id:"esterno-B-678910",label:"Esterno 6+7+8+9+10",area:"esterno",moduleIds:["esterno-6","esterno-7","esterno-8","esterno-9","esterno-10"],standardSeats:10,maxAdults:12,maxWithHighchairs:12,comfort:"normale",strategicCost:12,preservesLargeTables:0,manual:true,notes:"10/12 esterno"},
+
+  {id:"esterno-C-1112",label:"Esterno 11+12",area:"esterno",moduleIds:["esterno-11","esterno-12"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
+  {id:"esterno-C-1314",label:"Esterno 13+14",area:"esterno",moduleIds:["esterno-13","esterno-14"],standardSeats:4,maxAdults:6,maxWithHighchairs:6,comfort:"comodo",strategicCost:2,preservesLargeTables:5,notes:"4, capotavola esterni possibili"},
+  {id:"esterno-C-11121314",label:"Esterno 11+12+13+14",area:"esterno",moduleIds:["esterno-11","esterno-12","esterno-13","esterno-14"],standardSeats:8,maxAdults:10,maxWithHighchairs:10,comfort:"normale",strategicCost:8,preservesLargeTables:2,notes:"8/10 esterno"},
+  {id:"esterno-C-1112131415",label:"Esterno 11+12+13+14+15",area:"esterno",moduleIds:["esterno-11","esterno-12","esterno-13","esterno-14","esterno-15"],standardSeats:10,maxAdults:12,maxWithHighchairs:12,comfort:"normale",strategicCost:12,preservesLargeTables:0,manual:true,notes:"10/12 esterno"},
+
+  ...[11,12,13,14,15].map(n=>({
+    id:`marciapiede-${n}`,
+    label:`${n} marciapiede`,
+    area:"marciapiede" as Area,
+    moduleIds:[`marciapiede-${n}`],
+    standardSeats:2,
+    maxAdults:2,
+    maxWithHighchairs:3,
+    comfort:"normale" as const,
+    strategicCost:1,
+    preservesLargeTables:6,
+    notes:"2 o 2+1 seggiolone"
+  })),
+
+  {id:"dehor-1",label:"1 dehor",area:"dehor",moduleIds:["dehor-1"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:6,manual:true,notes:"Tavolo dehor singolo separabile"},
+  {id:"dehor-2",label:"2 dehor",area:"dehor",moduleIds:["dehor-2"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:6,manual:true,notes:"Tavolo dehor singolo separabile"},
+  {id:"dehor-3",label:"3 dehor",area:"dehor",moduleIds:["dehor-3"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:6,manual:true,notes:"Tavolo dehor singolo separabile"},
+  {id:"dehor-4",label:"4 dehor",area:"dehor",moduleIds:["dehor-4a","dehor-4b"],standardSeats:4,maxAdults:4,maxWithHighchairs:5,comfort:"normale",strategicCost:2,preservesLargeTables:5,manual:true,notes:"Tavolo dehor separabile"},
+  {id:"dehor-5",label:"5 dehor",area:"dehor",moduleIds:["dehor-5a","dehor-5b"],standardSeats:4,maxAdults:4,maxWithHighchairs:5,comfort:"normale",strategicCost:2,preservesLargeTables:5,manual:true,notes:"Tavolo dehor separabile"},
+  {id:"dehor-6",label:"6 dehor",area:"dehor",moduleIds:["dehor-6a","dehor-6b"],standardSeats:4,maxAdults:4,maxWithHighchairs:5,comfort:"normale",strategicCost:2,preservesLargeTables:5,manual:true,notes:"Tavolo dehor separabile"},
+  {id:"dehor-7",label:"7 dehor",area:"dehor",moduleIds:["dehor-7a","dehor-7b"],standardSeats:4,maxAdults:4,maxWithHighchairs:5,comfort:"normale",strategicCost:2,preservesLargeTables:5,manual:true,notes:"Tavolo dehor separabile"},
+  {id:"dehor-8",label:"8 dehor",area:"dehor",moduleIds:["dehor-8a","dehor-8b"],standardSeats:4,maxAdults:4,maxWithHighchairs:5,comfort:"normale",strategicCost:2,preservesLargeTables:5,manual:true,notes:"Tavolo dehor separabile"},
+  {id:"dehor-9",label:"9 dehor",area:"dehor",moduleIds:["dehor-9"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:6,manual:true,notes:"Tavolo dehor singolo separabile"},
+  {id:"dehor-10",label:"10 dehor",area:"dehor",moduleIds:["dehor-10"],standardSeats:2,maxAdults:2,maxWithHighchairs:3,comfort:"normale",strategicCost:1,preservesLargeTables:6,manual:true,notes:"Tavolo dehor singolo separabile"},
+
+  {id:"dehor-1-6",label:"1+6 dehor",area:"dehor",moduleIds:["dehor-1","dehor-6a","dehor-6b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
+  {id:"dehor-2-5",label:"2+5 dehor",area:"dehor",moduleIds:["dehor-2","dehor-5a","dehor-5b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
+  {id:"dehor-3-4",label:"3+4 dehor",area:"dehor",moduleIds:["dehor-3","dehor-4a","dehor-4b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
+  {id:"dehor-8-9",label:"8+9 dehor",area:"dehor",moduleIds:["dehor-8a","dehor-8b","dehor-9"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
+  {id:"dehor-10-7",label:"10+7 dehor",area:"dehor",moduleIds:["dehor-10","dehor-7a","dehor-7b"],standardSeats:6,maxAdults:6,maxWithHighchairs:7,comfort:"normale",strategicCost:3,preservesLargeTables:5,notes:"6 o 6+1 seggiolone"},
+
+  {id:"dehor-2-5-extra",label:"2+5 dehor + extra",area:"dehor",moduleIds:["dehor-2","dehor-5a","dehor-5b","dehor-10"],standardSeats:8,maxAdults:8,maxWithHighchairs:8,comfort:"stretto",strategicCost:10,preservesLargeTables:1,requiresOpenAwning:true,takesExtraDehor2:true,manual:true,notes:"8 solo tende aperte"},
+  {id:"dehor-3-4-extra",label:"3+4 dehor + extra",area:"dehor",moduleIds:["dehor-3","dehor-4a","dehor-4b","dehor-1"],standardSeats:8,maxAdults:8,maxWithHighchairs:8,comfort:"stretto",strategicCost:10,preservesLargeTables:1,requiresOpenAwning:true,takesExtraDehor2:true,manual:true,notes:"8 solo tende aperte"},
+  {id:"dehor-8-9-extra",label:"8+9 dehor + extra",area:"dehor",moduleIds:["dehor-8a","dehor-8b","dehor-9","dehor-2"],standardSeats:8,maxAdults:8,maxWithHighchairs:8,comfort:"stretto",strategicCost:10,preservesLargeTables:1,requiresOpenAwning:true,takesExtraDehor2:true,manual:true,notes:"8 solo tende aperte"}
 ];
 
 function Stat({icon:Icon,label,value}:{icon:React.ElementType;label:string;value:React.ReactNode}){return <Card className="rounded-2xl shadow-sm"><CardContent className="p-4 flex gap-3 items-center"><div className="p-2 rounded-xl bg-gray-100"><Icon className="w-5 h-5"/></div><div><div className="text-xs text-gray-500">{label}</div><div className="text-xl font-semibold">{value}</div></div></CardContent></Card>}
