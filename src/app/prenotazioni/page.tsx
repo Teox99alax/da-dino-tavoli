@@ -108,6 +108,20 @@ function normalizeName(value: string) {
   return (value || "").trim().toLowerCase();
 }
 
+function formatBigDate(dateISO: string) {
+  const date = new Date(`${dateISO}T12:00:00`);
+  return date.toLocaleDateString("it-IT", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function isToday(dateISO: string) {
+  return dateISO === todayISO();
+}
+
 export default function PrenotazioniPage() {
   const [email, setEmail] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayISO());
@@ -116,6 +130,7 @@ export default function PrenotazioniPage() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [editingReservationId, setEditingReservationId] = useState<number | null>(null);
 
   useEffect(() => {
     async function checkLogin() {
@@ -182,7 +197,8 @@ export default function PrenotazioniPage() {
       return (
         (r.name || "").toLowerCase().includes(q) ||
         (r.phone || "").toLowerCase().includes(q) ||
-        (r.time || "").toLowerCase().includes(q)
+        (r.time || "").toLowerCase().includes(q) ||
+        (r.table || "").toLowerCase().includes(q)
       );
     });
   }, [dayReservations, search]);
@@ -193,11 +209,12 @@ export default function PrenotazioniPage() {
     if (!name && !phone) return null;
 
     return activeReservations.find((r) => {
+      if (editingReservationId && r.id === editingReservationId) return false;
       const samePhone = phone && normalizePhone(r.phone || "") === phone;
       const sameName = name && normalizeName(r.name || "") === name;
       return samePhone || sameName;
     });
-  }, [activeReservations, form.name, form.phone]);
+  }, [activeReservations, form.name, form.phone, editingReservationId]);
 
   const customerHistory = useMemo<CustomerHistory | null>(() => {
     const name = normalizeName(form.name);
@@ -206,6 +223,7 @@ export default function PrenotazioniPage() {
 
     const matches = reservations
       .filter((r) => {
+        if (editingReservationId && r.id === editingReservationId) return false;
         const samePhone = phone && normalizePhone(r.phone || "") === phone;
         const sameName = name && normalizeName(r.name || "") === name;
         return samePhone || sameName;
@@ -230,7 +248,31 @@ export default function PrenotazioniPage() {
       lastNotes: last.notes || "",
       category: last.category || "normale",
     };
-  }, [reservations, form.name, form.phone]);
+  }, [reservations, form.name, form.phone, editingReservationId]);
+
+  function startEditReservation(r: Reservation) {
+    setEditingReservationId(r.id);
+    setSelectedDate(r.date);
+    setForm({
+      name: r.name || "",
+      phone: r.phone || "",
+      time: r.time || "21:00",
+      adults: Number(r.adults || 2),
+      highchairs: Number(r.highchairs || 0),
+      category: r.category || "normale",
+      areaPreference: r.areaPreference || "nessuna",
+      consumption: r.consumption || "non_so",
+      notes: r.notes || "",
+    });
+    setMessage(`Stai modificando la prenotazione di ${r.name}.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEdit() {
+    setEditingReservationId(null);
+    setForm(makeEmptyForm());
+    setMessage("Modifica annullata.");
+  }
 
   async function saveUnassignedReservation() {
     setMessage("");
@@ -247,6 +289,34 @@ export default function PrenotazioniPage() {
 
     try {
       setLoading(true);
+
+      if (editingReservationId) {
+        let editedName = form.name.trim();
+        const updated = reservations.map((r) => {
+          if (r.id !== editingReservationId) return r;
+
+          return {
+            ...r,
+            date: selectedDate,
+            name: form.name.trim(),
+            phone: form.phone.trim(),
+            time: form.time,
+            adults: Number(form.adults || 1),
+            highchairs: Number(form.highchairs || 0),
+            category: form.category,
+            areaPreference: form.areaPreference,
+            consumption: form.consumption,
+            notes: form.notes,
+          };
+        });
+
+        setReservations(updated);
+        await saveReservations(updated);
+        setEditingReservationId(null);
+        setForm(makeEmptyForm());
+        setMessage(`Prenotazione modificata: ${editedName} · ${formatBigDate(selectedDate)} · ore ${form.time}.`);
+        return;
+      }
 
       const newReservation: Reservation = {
         id: Date.now(),
@@ -272,13 +342,20 @@ export default function PrenotazioniPage() {
       setReservations(updated);
       await saveReservations(updated);
       setForm(makeEmptyForm());
-      setMessage("Prenotazione salvata: tavolo da assegnare.");
+      setMessage(`Prenotazione salvata: ${newReservation.name} · ${formatBigDate(selectedDate)} · ore ${newReservation.time} · tavolo da assegnare.`);
     } catch (error) {
       console.error(error);
       setMessage("Errore durante il salvataggio. Riprova.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function markNoShow(id: number) {
+    const updated = reservations.map((r) => r.id === id ? { ...r, status: "no_show" as Status } : r);
+    setReservations(updated);
+    await saveReservations(updated);
+    setMessage("Prenotazione segnata come no-show.");
   }
 
   async function logout() {
@@ -296,17 +373,49 @@ export default function PrenotazioniPage() {
           </div>
 
           <div className="flex gap-2 flex-wrap items-center">
-            <input
-              type="date"
-              className="border rounded-xl px-3 py-2 bg-white"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-            />
             <button onClick={logout} className="border rounded-xl px-4 py-2 bg-white">
               Esci
             </button>
           </div>
         </div>
+
+        <section className={`border rounded-2xl p-5 ${isToday(selectedDate) ? "bg-black text-white border-black" : "bg-red-50 border-red-300 text-red-950"}`}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold opacity-80">DATA PRENOTAZIONE</div>
+              <div className="text-4xl md:text-5xl font-black uppercase leading-tight">
+                {isToday(selectedDate) ? "OGGI" : "ATTENZIONE"}
+              </div>
+              <div className="text-2xl md:text-3xl font-bold capitalize mt-1">
+                {formatBigDate(selectedDate)}
+              </div>
+              {!isToday(selectedDate) && (
+                <div className="mt-2 text-lg font-bold">
+                  Stai segnando una prenotazione per un giorno diverso da oggi.
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white text-black rounded-2xl p-3 min-w-[230px]">
+              <label className="text-xs text-gray-500 font-semibold">Cambia data</label>
+              <input
+                type="date"
+                className="border rounded-xl px-3 py-3 bg-white w-full text-lg font-bold mt-1"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+              />
+              {!isToday(selectedDate) && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(todayISO())}
+                  className="mt-2 w-full rounded-xl bg-black text-white px-3 py-2 font-semibold"
+                >
+                  Torna a oggi
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
 
         <div className="grid md:grid-cols-3 gap-3">
           <div className="bg-white border rounded-2xl p-5">
@@ -322,18 +431,32 @@ export default function PrenotazioniPage() {
           </div>
 
           <div className="bg-white border rounded-2xl p-5">
-            <div className="text-sm text-gray-500">Prenotazioni oggi</div>
+            <div className="text-sm text-gray-500">Prenotazioni nella data</div>
             <div className="text-4xl font-bold">{activeReservations.length}</div>
             <div className="text-xs text-gray-500 mt-1">Fuori turno: {outsideTurn.length}</div>
           </div>
         </div>
 
         <section className="bg-white border rounded-2xl p-5 space-y-4">
-          <div>
-            <h2 className="text-2xl font-bold">Nuova prenotazione</h2>
-            <p className="text-sm text-gray-500">
-              Questa pagina salva sempre il tavolo come Da assegnare. Matteo lo assegnera dalla dashboard.
-            </p>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-2xl font-bold">{editingReservationId ? "Modifica prenotazione" : "Nuova prenotazione"}</h2>
+              <p className="text-sm text-gray-500">
+                {editingReservationId
+                  ? "Modifica nome, data, orario, persone, preferenze e note. Se Matteo ha già assegnato il tavolo, il tavolo resta salvato."
+                  : "Questa pagina salva sempre il tavolo come Da assegnare. Matteo lo assegnerà dalla dashboard."}
+              </p>
+            </div>
+
+            {editingReservationId && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="border rounded-xl px-4 py-3 bg-white font-semibold"
+              >
+                Annulla modifica
+              </button>
+            )}
           </div>
 
           {message ? (
@@ -343,14 +466,14 @@ export default function PrenotazioniPage() {
           ) : null}
 
           {possibleDuplicate ? (
-            <div className="border rounded-xl p-3 bg-orange-50 text-orange-900">
-              Possibile doppione oggi: {possibleDuplicate.time} - {possibleDuplicate.name} x{possibleDuplicate.adults} - {possibleDuplicate.table}
+            <div className="border rounded-xl p-3 bg-orange-50 text-orange-900 font-bold">
+              Possibile doppione nella stessa data: {possibleDuplicate.time} - {possibleDuplicate.name} x{possibleDuplicate.adults} - {possibleDuplicate.table}
             </div>
           ) : null}
 
           {customerHistory ? (
             <div className="border rounded-xl p-4 bg-blue-50 text-blue-950 space-y-1">
-              <div className="font-bold text-lg">Cliente gia conosciuto</div>
+              <div className="font-bold text-lg">Cliente già conosciuto</div>
               <div className="text-sm">
                 {customerHistory.name} {customerHistory.phone ? `- ${customerHistory.phone}` : ""}
               </div>
@@ -396,7 +519,7 @@ export default function PrenotazioniPage() {
                     key={time}
                     type="button"
                     onClick={() => setForm({ ...form, time })}
-                    className={`px-3 py-2 rounded-xl border text-sm ${form.time === time ? "bg-black text-white border-black" : "bg-white"}`}
+                    className={`px-4 py-3 rounded-xl border text-base font-bold ${form.time === time ? "bg-black text-white border-black" : "bg-white"}`}
                   >
                     {time}
                   </button>
@@ -464,8 +587,8 @@ export default function PrenotazioniPage() {
           </div>
 
           <textarea
-            className="border rounded-xl p-4 w-full min-h-[100px]"
-            placeholder="Note: passeggino, compleanno, allergie, preferenze, richieste..."
+            className="border rounded-xl p-4 w-full min-h-[120px] text-lg"
+            placeholder="Note importanti: passeggino, compleanno, allergie, cane, carrozzina, preferenze, richieste..."
             value={form.notes}
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
           />
@@ -473,9 +596,9 @@ export default function PrenotazioniPage() {
           <button
             onClick={saveUnassignedReservation}
             disabled={loading}
-            className="w-full bg-black text-white rounded-2xl p-4 text-lg font-bold disabled:opacity-50"
+            className={`w-full text-white rounded-2xl p-4 text-lg font-bold disabled:opacity-50 ${editingReservationId ? "bg-blue-700" : "bg-black"}`}
           >
-            {loading ? "Salvataggio..." : "Registra prenotazione - Da assegnare"}
+            {loading ? "Salvataggio..." : editingReservationId ? "Salva modifiche prenotazione" : "Registra prenotazione - Da assegnare"}
           </button>
         </section>
 
@@ -483,11 +606,11 @@ export default function PrenotazioniPage() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="text-2xl font-bold">Prenotazioni del giorno</h2>
-              <p className="text-sm text-gray-500">Include anche quelle gia assegnate da Matteo.</p>
+              <p className="text-sm text-gray-500">Include anche quelle già assegnate da Matteo. I telefonisti possono correggere una prenotazione.</p>
             </div>
             <input
               className="border rounded-xl p-3"
-              placeholder="Cerca nome, telefono, orario..."
+              placeholder="Cerca nome, telefono, orario, tavolo..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -514,9 +637,27 @@ export default function PrenotazioniPage() {
                   {r.notes ? <div className="text-xs mt-1">Note: {r.notes}</div> : null}
                 </div>
 
-                <span className={`text-xs px-3 py-2 rounded-full font-medium ${statusClass(r.status)}`}>
-                  {r.status}
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-xs px-3 py-2 rounded-full font-medium ${statusClass(r.status)}`}>
+                    {r.status}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => startEditReservation(r)}
+                    className="border rounded-xl px-4 py-2 bg-white font-semibold"
+                  >
+                    Modifica
+                  </button>
+                  {r.status === "confermata" && (
+                    <button
+                      type="button"
+                      onClick={() => markNoShow(r.id)}
+                      className="border rounded-xl px-4 py-2 bg-white text-red-700 font-semibold"
+                    >
+                      No-show
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
