@@ -1,42 +1,44 @@
-import { createClient } from "@supabase/supabase-js";
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 export async function loadReservations() {
-  const { data, error } = await supabase
-    .from("reservations")
-    .select("data");
+  const res = await fetch(`${supabaseUrl}/rest/v1/reservations?select=data`, {
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+    },
+  });
 
-  if (error) {
-    alert("ERRORE LOAD: " + error.message);
+  if (!res.ok) {
+    alert("ERRORE LOAD HTTP: " + res.status + " - " + (await res.text()));
     return [];
   }
 
-  return data?.map((r: any) => r.data) || [];
+  const data = await res.json();
+  return data.map((r: any) => r.data);
 }
 
 export async function saveReservations(reservations: any[]) {
-  alert("URL USATO: " + supabaseUrl);
-alert("KEY USATA: " + supabaseAnonKey.slice(0, 25));
-  alert("STO SALVANDO " + reservations.length + " prenotazioni");
+  alert("URL: " + supabaseUrl);
+  alert("KEY: " + supabaseAnonKey.slice(0, 30));
 
-  const { data, error } = await supabase
-    .from("reservations")
-    .insert(
-      reservations.map((r) => ({
-        data: r,
-      }))
-    )
-    .select();
+  const rows = reservations.map((r) => ({ data: r }));
 
-  if (error) {
-    alert("ERRORE SAVE: " + error.message);
-    console.error("Errore saveReservations:", error);
+  const res = await fetch(`${supabaseUrl}/rest/v1/reservations`, {
+    method: "POST",
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify(rows),
+  });
+
+  if (!res.ok) {
+    alert("ERRORE SAVE HTTP: " + res.status + " - " + (await res.text()));
     return;
   }
 
-  alert("SALVATO SU SUPABASE: " + JSON.stringify(data));
+  alert("SALVATO OK");
 }
