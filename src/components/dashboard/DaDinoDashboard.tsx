@@ -5,7 +5,7 @@ import { AlertTriangle, BarChart3, CheckCircle2, Clock3, CloudRain, LogOut, MapP
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { saveReservations, loadReservations } from "@/lib/storage";
-
+import { getCurrentUserRole } from "@/lib/auth";
 type Area = "sala" | "saletta" | "dehor" | "marciapiede" | "esterno";
 type Weather = "normale" | "rischio" | "pioggia";
 type Service = "pranzo" | "cena";
