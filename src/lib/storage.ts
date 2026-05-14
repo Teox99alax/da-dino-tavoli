@@ -1,54 +1,89 @@
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export async function loadReservations() {
-  const res = await fetch(`${supabaseUrl}/rest/v1/reservations?select=data`, {
-    method: "GET",
-    headers: {
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
-    },
-  });
-
-  if (!res.ok) {
-    alert("ERRORE LOAD HTTP: " + res.status + " - " + (await res.text()));
-    return [];
-  }
-
-  const data = await res.json();
-  return data.map((r: any) => r.data);
-}
-
-export async function saveReservations(reservations: any[]) {
-  const del = await fetch(`${supabaseUrl}/rest/v1/reservations?id=neq.0`, {
-    method: "DELETE",
-    headers: {
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
-    },
-  });
-
-  if (!del.ok) {
-    alert("ERRORE DELETE HTTP: " + del.status + " - " + (await del.text()));
-    return;
-  }
-
-  if (!reservations.length) return;
-
-  const rows = reservations.map((r) => ({ data: r }));
-
-  const res = await fetch(`${supabaseUrl}/rest/v1/reservations`, {
-    method: "POST",
+async function supabaseRequest(path: string, options: RequestInit = {}) {
+  const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${supabaseAnonKey}`,
       "Content-Type": "application/json",
-      Prefer: "return=representation",
+      ...(options.headers || {}),
     },
-    body: JSON.stringify(rows),
   });
 
   if (!res.ok) {
-    alert("ERRORE SAVE HTTP: " + res.status + " - " + (await res.text()));
+    const text = await res.text();
+    throw new Error(`${res.status} - ${text}`);
   }
+
+  return res;
+}
+
+export async function loadReservations() {
+  const res = await supabaseRequest("reservations?select=data&order=id.asc", {
+    method: "GET",
+  });
+
+  const data = await res.json();
+  return data.map((row: any) => row.data);
+}
+
+export async function saveReservations(reservations: any[]) {
+  await supabaseRequest("reservations?id=neq.0", {
+    method: "DELETE",
+  });
+
+  if (!reservations.length) return;
+
+  await supabaseRequest("reservations", {
+    method: "POST",
+    headers: {
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify(reservations.map((r) => ({ data: r }))),
+  });
+}
+
+export async function loadCustomers() {
+  const res = await supabaseRequest("customers?select=*&order=id.desc", {
+    method: "GET",
+  });
+
+  return await res.json();
+}
+
+export async function saveCustomer(customer: any) {
+  await supabaseRequest("customers", {
+    method: "POST",
+    headers: {
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify(customer),
+  });
+}
+
+export async function loadWaitlist() {
+  const res = await supabaseRequest("waitlist?select=data&order=id.asc", {
+    method: "GET",
+  });
+
+  const data = await res.json();
+  return data.map((row: any) => row.data);
+}
+
+export async function saveWaitlist(waitlist: any[]) {
+  await supabaseRequest("waitlist?id=neq.0", {
+    method: "DELETE",
+  });
+
+  if (!waitlist.length) return;
+
+  await supabaseRequest("waitlist", {
+    method: "POST",
+    headers: {
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify(waitlist.map((w) => ({ data: w }))),
+  });
 }
