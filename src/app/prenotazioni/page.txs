@@ -460,3 +460,10 @@ export default function PrenotazioniPage() {
     </div>
   );
 }
+
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
