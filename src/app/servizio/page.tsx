@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/auth";
 import { loadReservations, saveReservations } from "@/lib/storage";
 
@@ -35,6 +35,13 @@ type BaseTable = {
 };
 
 type TableVisualStatus = "libero" | "prenotato_dopo" | "occupato";
+
+type ChangeSuggestion = {
+  table: BaseTable;
+  kind: "free" | "swap" | "director";
+  message: string;
+  swapReservation?: Reservation;
+};
 
 const BASE_TABLES: BaseTable[] = [
   { id: "sala-1", label: "1 sala", area: "SALA" },
@@ -199,12 +206,36 @@ function hasStrongPreference(r: Reservation) {
   return !!r.areaPreference && r.areaPreference !== "nessuna";
 }
 
-type ChangeSuggestion = {
-  table: BaseTable;
-  kind: "free" | "swap" | "director";
-  message: string;
-  swapReservation?: Reservation;
-};
+function playArrivalSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const audioContext = new AudioContextClass();
+
+    const playTone = (frequency: number, delay: number, duration: number) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      gain.gain.value = 0.0001;
+
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+
+      const start = audioContext.currentTime + delay;
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+      oscillator.start(start);
+      oscillator.stop(start + duration + 0.03);
+    };
+
+    playTone(880, 0, 0.18);
+    playTone(1175, 0.22, 0.22);
+  } catch (error) {
+    console.error("Audio non disponibile", error);
+  }
+}
 
 export default function ServizioPage() {
   const [email, setEmail] = useState("");
@@ -213,6 +244,9 @@ export default function ServizioPage() {
   const [now, setNow] = useState(currentTimeLabel());
   const [searchName, setSearchName] = useState("");
   const [changeRequestId, setChangeRequestId] = useState<number | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [lastSoundMessage, setLastSoundMessage] = useState("");
+  const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     async function check() {
@@ -271,6 +305,20 @@ export default function ServizioPage() {
     .filter((r) => !isOccupiedStatus(r.status))
     .filter((r) => toMin(r.time) >= nowMin() - 5 && toMin(r.time) <= nowMin() + 10)
     .sort((a, b) => toMin(a.time) - toMin(b.time));
+
+  useEffect(() => {
+    if (!soundEnabled) return;
+
+    const newArrival = upcoming.find((r) => !notifiedArrivalIds.current.has(r.id));
+    if (!newArrival) return;
+
+    notifiedArrivalIds.current.add(newArrival.id);
+    playArrivalSound();
+
+    if (navigator.vibrate) navigator.vibrate([200, 80, 200]);
+
+    setLastSoundMessage(`${newArrival.time} - ${newArrival.name} x${newArrival.adults} in arrivo`);
+  }, [upcoming, soundEnabled]);
 
   const tableRows = useMemo(() => {
     return BASE_TABLES.map((table) => {
@@ -509,6 +557,30 @@ export default function ServizioPage() {
             </button>
           </div>
         </div>
+
+        <section className="bg-white border rounded-2xl p-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold">Notifiche arrivi</h2>
+              <p className="text-sm text-gray-500">
+                Attiva il suono sul dispositivo. Su iPhone e Android serve premere il bottone almeno una volta.
+              </p>
+              {lastSoundMessage && <p className="text-sm font-semibold mt-2 text-green-800">Ultimo avviso: {lastSoundMessage}</p>}
+            </div>
+
+            <button
+              onClick={() => {
+                playArrivalSound();
+                if (navigator.vibrate) navigator.vibrate(150);
+                setSoundEnabled(true);
+                setLastSoundMessage("Audio attivato correttamente");
+              }}
+              className={`rounded-xl px-5 py-3 font-semibold ${soundEnabled ? "bg-green-700 text-white" : "bg-black text-white"}`}
+            >
+              {soundEnabled ? "Suono attivo" : "Attiva suono"}
+            </button>
+          </div>
+        </section>
 
         <section className="bg-white border rounded-2xl p-5">
           <h2 className="text-2xl font-bold mb-3">Cerca prenotazione</h2>
@@ -775,4 +847,5 @@ export default function ServizioPage() {
     </div>
   );
 }
+
 
