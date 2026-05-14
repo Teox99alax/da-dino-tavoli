@@ -43,6 +43,17 @@ type FormState = {
   notes: string;
 };
 
+type CustomerHistory = {
+  name: string;
+  phone: string;
+  visits: number;
+  lastVisit: string;
+  lastTime: string;
+  lastTable: string;
+  lastNotes: string;
+  category: Category;
+};
+
 const QUICK_TIMES = ["19:15", "19:30", "19:45", "21:00", "21:15", "21:30"];
 const AREAS: Area[] = ["sala", "saletta", "dehor", "marciapiede", "esterno"];
 const TOTAL_CAPACITY = 27 + 18 + 30 + 15 + 36;
@@ -87,6 +98,14 @@ function makeEmptyForm(): FormState {
     consumption: "non_so",
     notes: "",
   };
+}
+
+function normalizePhone(value: string) {
+  return (value || "").replace(/\s/g, "").replace(/-/g, "").replace(/\./g, "");
+}
+
+function normalizeName(value: string) {
+  return (value || "").trim().toLowerCase();
 }
 
 export default function PrenotazioniPage() {
@@ -169,16 +188,49 @@ export default function PrenotazioniPage() {
   }, [dayReservations, search]);
 
   const possibleDuplicate = useMemo(() => {
-    const name = form.name.trim().toLowerCase();
-    const phone = form.phone.trim().toLowerCase();
+    const name = normalizeName(form.name);
+    const phone = normalizePhone(form.phone);
     if (!name && !phone) return null;
 
     return activeReservations.find((r) => {
-      const samePhone = phone && (r.phone || "").toLowerCase() === phone;
-      const sameName = name && (r.name || "").toLowerCase() === name;
+      const samePhone = phone && normalizePhone(r.phone || "") === phone;
+      const sameName = name && normalizeName(r.name || "") === name;
       return samePhone || sameName;
     });
   }, [activeReservations, form.name, form.phone]);
+
+  const customerHistory = useMemo<CustomerHistory | null>(() => {
+    const name = normalizeName(form.name);
+    const phone = normalizePhone(form.phone);
+    if (!name && !phone) return null;
+
+    const matches = reservations
+      .filter((r) => {
+        const samePhone = phone && normalizePhone(r.phone || "") === phone;
+        const sameName = name && normalizeName(r.name || "") === name;
+        return samePhone || sameName;
+      })
+      .sort((a, b) => {
+        const ad = `${a.date} ${a.time}`;
+        const bd = `${b.date} ${b.time}`;
+        return bd.localeCompare(ad);
+      });
+
+    if (matches.length === 0) return null;
+
+    const last = matches[0];
+
+    return {
+      name: last.name || form.name,
+      phone: last.phone || form.phone,
+      visits: matches.length,
+      lastVisit: last.date,
+      lastTime: last.time,
+      lastTable: last.table,
+      lastNotes: last.notes || "",
+      category: last.category || "normale",
+    };
+  }, [reservations, form.name, form.phone]);
 
   async function saveUnassignedReservation() {
     setMessage("");
@@ -292,7 +344,25 @@ export default function PrenotazioniPage() {
 
           {possibleDuplicate ? (
             <div className="border rounded-xl p-3 bg-orange-50 text-orange-900">
-              Possibile doppione: {possibleDuplicate.time} - {possibleDuplicate.name} x{possibleDuplicate.adults} - {possibleDuplicate.table}
+              Possibile doppione oggi: {possibleDuplicate.time} - {possibleDuplicate.name} x{possibleDuplicate.adults} - {possibleDuplicate.table}
+            </div>
+          ) : null}
+
+          {customerHistory ? (
+            <div className="border rounded-xl p-4 bg-blue-50 text-blue-950 space-y-1">
+              <div className="font-bold text-lg">Cliente gia conosciuto</div>
+              <div className="text-sm">
+                {customerHistory.name} {customerHistory.phone ? `- ${customerHistory.phone}` : ""}
+              </div>
+              <div className="text-sm">
+                Visite registrate: <b>{customerHistory.visits}</b> - Ultima volta: <b>{customerHistory.lastVisit}</b> alle <b>{customerHistory.lastTime}</b>
+              </div>
+              <div className="text-sm">
+                Ultimo tavolo: <b>{customerHistory.lastTable}</b> - Categoria: <b>{customerHistory.category}</b>
+              </div>
+              {customerHistory.lastNotes ? (
+                <div className="text-sm">Note precedenti: {customerHistory.lastNotes}</div>
+              ) : null}
             </div>
           ) : null}
 
@@ -455,4 +525,5 @@ export default function PrenotazioniPage() {
     </div>
   );
 }
+
 
