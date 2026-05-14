@@ -65,7 +65,6 @@ export default function ServizioPage() {
   const [email, setEmail] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     async function check() {
@@ -91,16 +90,11 @@ export default function ServizioPage() {
     load();
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => setTick((x) => x + 1), 60000);
-    return () => clearInterval(interval);
-  }, []);
-
   const todayReservations = useMemo(() => {
     return reservations
       .filter((r) => r.date === selectedDate)
       .sort((a, b) => toMin(a.time) - toMin(b.time));
-  }, [reservations, selectedDate, tick]);
+  }, [reservations, selectedDate]);
 
   const activeReservations = todayReservations.filter(
     (r) => r.status !== "liberato" && r.status !== "no_show"
@@ -153,7 +147,7 @@ export default function ServizioPage() {
             <p className="text-gray-500">Accesso staff: {email}</p>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <input
               type="date"
               className="border rounded-xl px-3 py-2 bg-white"
@@ -345,3 +339,4 @@ export default function ServizioPage() {
     </div>
   );
 }
+
