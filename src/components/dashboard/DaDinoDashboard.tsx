@@ -5,6 +5,7 @@ import { AlertTriangle, BarChart3, CheckCircle2, Clock3, CloudRain, LogOut, MapP
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { saveReservations, loadReservations } from "@/lib/storage";
+import { getCurrentUserRole } from "@/lib/auth";
 
 type Area = "sala" | "saletta" | "dehor" | "marciapiede" | "esterno";
 type Weather = "normale" | "rischio" | "pioggia";
@@ -102,17 +103,21 @@ const [form,setForm]=useState<FormState>({name:"",phone:"",time:"21:00",adults:2
 
 useEffect(() => {
   async function checkLogin() {
-    const { createClient } = await import("@supabase/supabase-js");
+    const { supabase } = await import("@/lib/auth");
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    const { data } = await supabase.auth.getSession();
-
-    if (!data.session) {
+    if (!session) {
       window.location.href = "/login";
+      return;
+    }
+
+    const role = await getCurrentUserRole();
+
+    if (role !== "admin") {
+      window.location.href = "/servizio";
     }
   }
 
