@@ -11,33 +11,30 @@ export async function loadReservations() {
     .select("data");
 
   if (error) {
-    console.error("Errore loadReservations:", error);
+    alert("ERRORE LOAD: " + error.message);
     return [];
   }
 
-  return data.map((r: any) => r.data);
+  return data?.map((r: any) => r.data) || [];
 }
 
 export async function saveReservations(reservations: any[]) {
-  const { error: deleteError } = await supabase
-    .from("reservations")
-    .delete()
-    .neq("id", 0);
+  alert("STO SALVANDO " + reservations.length + " prenotazioni");
 
-  if (deleteError) {
-    console.error("Errore delete:", deleteError);
+  const { data, error } = await supabase
+    .from("reservations")
+    .insert(
+      reservations.map((r) => ({
+        data: r,
+      }))
+    )
+    .select();
+
+  if (error) {
+    alert("ERRORE SAVE: " + error.message);
+    console.error("Errore saveReservations:", error);
     return;
   }
 
-  const rows = reservations.map((r) => ({
-    data: r,
-  }));
-
-  const { error } = await supabase
-    .from("reservations")
-    .insert(rows);
-
-  if (error) {
-    console.error("Errore saveReservations:", error);
-  }
+  alert("SALVATO SU SUPABASE: " + JSON.stringify(data));
 }
