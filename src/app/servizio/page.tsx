@@ -34,7 +34,7 @@ type BaseTable = {
   area: "SALA" | "SALETTA" | "DEHOR" | "MARCIAPIEDE" | "ESTERNO";
 };
 
-type TableVisualStatus = "libero" | "prenotato_dopo" | "prenotato_attesa" | "occupato";
+type TableVisualStatus = "libero" | "prenotato_dopo" | "occupato";
 
 const BASE_TABLES: BaseTable[] = [
   { id: "sala-1", label: "1 sala", area: "SALA" },
@@ -111,8 +111,7 @@ function minutesLabel(mins: number) {
 
 function tableStatusClass(status: TableVisualStatus) {
   if (status === "occupato") return "bg-red-100 border-red-300 text-red-950";
-  if (status === "prenotato_attesa") return "bg-yellow-100 border-yellow-300 text-yellow-950";
-  if (status === "prenotato_dopo") return "bg-white border-gray-300 text-gray-950";
+  if (status === "prenotato_dopo") return "bg-yellow-100 border-yellow-300 text-yellow-950";
   return "bg-green-100 border-green-300 text-green-950";
 }
 
@@ -274,32 +273,23 @@ export default function ServizioPage() {
     .sort((a, b) => toMin(a.time) - toMin(b.time));
 
   const tableRows = useMemo(() => {
-    const currentMinute = nowMin();
-
     return BASE_TABLES.map((table) => {
       const matches = activeReservations
         .filter((r) => reservationUsesTable(r, table))
         .sort((a, b) => toMin(a.time) - toMin(b.time));
 
       const occupied = matches.find((r) => isOccupiedStatus(r.status));
-      const waitingNow = matches.find(
-        (r) => r.status === "confermata" && toMin(r.time) <= currentMinute + 20
-      );
-      const future = matches.find(
-        (r) => r.status === "confermata" && toMin(r.time) > currentMinute + 20
-      );
+      const booked = matches.find((r) => r.status === "confermata");
 
       let status: TableVisualStatus = "libero";
       if (occupied) status = "occupato";
-      else if (waitingNow) status = "prenotato_attesa";
-      else if (future) status = "prenotato_dopo";
+      else if (booked) status = "prenotato_dopo";
 
       return {
         table,
         matches,
         occupied,
-        waitingNow,
-        future,
+        booked,
         status,
       };
     });
@@ -334,10 +324,6 @@ export default function ServizioPage() {
       if (!reservationUsesTable(r, table)) return false;
       return overlap(start, end, toMin(r.time), getEstimatedReleaseMin(r));
     });
-  }
-
-  function tableIsFreeForReservation(table: BaseTable, target: Reservation) {
-    return conflictsForTable(table, target).length === 0;
   }
 
   function canMoveOtherReservationToOldTable(other: Reservation, oldTable: BaseTable, target: Reservation) {
@@ -688,7 +674,7 @@ export default function ServizioPage() {
             <div>
               <h2 className="text-2xl font-bold">Tutti i tavoli</h2>
               <p className="text-sm text-gray-500">
-                Verde libero tutta la sera · Bianco libero ora ma prenotato dopo · Giallo prenotato non ancora arrivato · Rosso occupato
+                Verde libero tutta la sera · Giallo libero ora ma prenotato più tardi · Rosso occupato
               </p>
             </div>
 
@@ -713,8 +699,7 @@ export default function ServizioPage() {
                           <div className="text-xl font-bold">{table.label}</div>
                           <div className="text-sm font-medium">
                             {status === "libero" && "LIBERO TUTTA LA SERA"}
-                            {status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO DOPO"}
-                            {status === "prenotato_attesa" && "PRENOTATO · NON ANCORA ARRIVATO"}
+                            {status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO PIÙ TARDI"}
                             {status === "occupato" && "OCCUPATO"}
                           </div>
                         </div>
@@ -790,3 +775,4 @@ export default function ServizioPage() {
     </div>
   );
 }
+
