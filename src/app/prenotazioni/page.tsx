@@ -358,6 +358,35 @@ export default function PrenotazioniPage() {
     setMessage("Prenotazione segnata come no-show.");
   }
 
+  async function cancelReservation(id: number) {
+    const target = reservations.find((r) => r.id === id);
+    const confirmed = window.confirm(
+      target
+        ? `Annullare la prenotazione di ${target.name} delle ${target.time}?`
+        : "Annullare questa prenotazione?"
+    );
+
+    if (!confirmed) return;
+
+    const updated = reservations.map((r) =>
+      r.id === id
+        ? {
+            ...r,
+            status: "no_show" as Status,
+            notes: `${r.notes || ""}${r.notes ? " · " : ""}Annullata da telefonista`,
+          }
+        : r
+    );
+
+    setReservations(updated);
+    await saveReservations(updated);
+    setMessage(
+      target
+        ? `Prenotazione annullata: ${target.name} · ${target.time}.`
+        : "Prenotazione annullata."
+    );
+  }
+
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/login";
@@ -652,9 +681,19 @@ export default function PrenotazioniPage() {
                     <button
                       type="button"
                       onClick={() => markNoShow(r.id)}
-                      className="border rounded-xl px-4 py-2 bg-white text-red-700 font-semibold"
+                      className="border rounded-xl px-4 py-2 bg-white text-orange-700 font-semibold"
                     >
                       No-show
+                    </button>
+                  )}
+
+                  {isActiveStatus(r.status) && (
+                    <button
+                      type="button"
+                      onClick={() => cancelReservation(r.id)}
+                      className="border rounded-xl px-4 py-2 bg-red-700 text-white font-semibold"
+                    >
+                      Annulla
                     </button>
                   )}
                 </div>
@@ -666,5 +705,6 @@ export default function PrenotazioniPage() {
     </div>
   );
 }
+
 
 
