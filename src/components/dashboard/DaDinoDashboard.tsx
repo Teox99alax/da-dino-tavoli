@@ -99,7 +99,24 @@ const [reservations,setReservations]=useState<Reservation[]>([]);
 const [loadedFromCloud,setLoadedFromCloud]=useState(false);
 const [customers,setCustomers]=useState<Customer[]>([]);
 const [form,setForm]=useState<FormState>({name:"",phone:"",time:"21:00",adults:2,highchairs:0,category:"normale",areaPreference:"nessuna",consumption:"non_so",notes:""});
+useEffect(() => {
+  async function checkLogin() {
+    const { createClient } = await import("@supabase/supabase-js");
 
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    const { data } = await supabase.auth.getSession();
+
+    if (!data.session) {
+      window.location.href = "/login";
+    }
+  }
+
+  checkLogin();
+}, []);
 useEffect(() => {
   async function loadCloudData() {
     const data = await loadReservations();
