@@ -19,6 +19,8 @@ export async function loadReservations() {
 }
 
 export async function saveReservations(reservations: any[]) {
+  alert("URL USATO: " + supabaseUrl);
+alert("KEY USATA: " + supabaseAnonKey.slice(0, 25));
   alert("STO SALVANDO " + reservations.length + " prenotazioni");
 
   const { data, error } = await supabase
