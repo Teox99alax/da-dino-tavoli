@@ -12,6 +12,16 @@ export async function getCurrentUserRole() {
 
   if (!session) return null;
 
+  const email = session.user.email || "";
+
+  if (email === "matteo@dadino.local") return "admin";
+
+  if (email === "ale@dadino.local") return "telefonista";
+  if (email === "dino@dadino.local") return "telefonista";
+
+  if (email === "bruna@dadino.local") return "staff";
+  if (email === "lexi@dadino.local") return "staff";
+
   const { data } = await supabase
     .from("profiles")
     .select("role")
