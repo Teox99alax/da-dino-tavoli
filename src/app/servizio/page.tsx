@@ -178,11 +178,42 @@ function getEstimatedReleaseTime(r: Reservation) {
   return fromMin(start + duration + 10);
 }
 
+function getEstimatedReleaseMin(r: Reservation) {
+  const start = toMin(r.time);
+  const duration = r.consumption === "cucina" ? 105 : r.consumption === "pinsa" ? 75 : 90;
+  return start + duration + 10;
+}
+
+function getTableCapacity(table: BaseTable) {
+  if (table.id === "sala-6") return 6;
+  if (["sala-1", "sala-5"].includes(table.id)) return 4;
+  if (table.area === "SALETTA") return 4;
+  if (["dehor-4", "dehor-5", "dehor-6", "dehor-7", "dehor-8"].includes(table.id)) return 4;
+  return 2;
+}
+
+function overlap(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+function hasStrongPreference(r: Reservation) {
+  return !!r.areaPreference && r.areaPreference !== "nessuna";
+}
+
+type ChangeSuggestion = {
+  table: BaseTable;
+  kind: "free" | "swap" | "director";
+  message: string;
+  swapReservation?: Reservation;
+};
+
 export default function ServizioPage() {
   const [email, setEmail] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [now, setNow] = useState(currentTimeLabel());
+  const [searchName, setSearchName] = useState("");
+  const [changeRequestId, setChangeRequestId] = useState<number | null>(null);
 
   useEffect(() => {
     async function check() {
@@ -225,6 +256,17 @@ export default function ServizioPage() {
   }, [reservations, selectedDate, now]);
 
   const activeReservations = todayReservations.filter(isActiveReservation);
+
+  const searchedReservations = useMemo(() => {
+    const q = searchName.trim().toLowerCase();
+    if (!q) return [];
+
+    return activeReservations.filter((r) =>
+      (r.name || "").toLowerCase().includes(q) ||
+      (r.phone || "").toLowerCase().includes(q) ||
+      (r.table || "").toLowerCase().includes(q)
+    );
+  }, [activeReservations, searchName]);
 
   const upcoming = activeReservations
     .filter((r) => !isOccupiedStatus(r.status))
@@ -278,6 +320,131 @@ export default function ServizioPage() {
 
     return groups;
   }, [tableRows]);
+
+  function findCurrentBaseTable(r: Reservation) {
+    return BASE_TABLES.find((table) => reservationUsesTable(r, table)) || null;
+  }
+
+  function conflictsForTable(table: BaseTable, target: Reservation) {
+    const start = toMin(target.time);
+    const end = getEstimatedReleaseMin(target);
+
+    return activeReservations.filter((r) => {
+      if (r.id === target.id) return false;
+      if (!reservationUsesTable(r, table)) return false;
+      return overlap(start, end, toMin(r.time), getEstimatedReleaseMin(r));
+    });
+  }
+
+  function tableIsFreeForReservation(table: BaseTable, target: Reservation) {
+    return conflictsForTable(table, target).length === 0;
+  }
+
+  function canMoveOtherReservationToOldTable(other: Reservation, oldTable: BaseTable, target: Reservation) {
+    const start = toMin(other.time);
+    const end = getEstimatedReleaseMin(other);
+
+    return activeReservations.every((r) => {
+      if (r.id === other.id || r.id === target.id) return true;
+      if (!reservationUsesTable(r, oldTable)) return true;
+      return !overlap(start, end, toMin(r.time), getEstimatedReleaseMin(r));
+    });
+  }
+
+  function getChangeSuggestions(target: Reservation): ChangeSuggestion[] {
+    const totalPeople = Number(target.adults || 0) + Number(target.highchairs || 0);
+    const currentTable = findCurrentBaseTable(target);
+    const currentCapacity = currentTable ? getTableCapacity(currentTable) : totalPeople;
+
+    const similarTables = BASE_TABLES
+      .filter((table) => table.id !== currentTable?.id)
+      .filter((table) => getTableCapacity(table) >= totalPeople)
+      .filter((table) => getTableCapacity(table) <= Math.max(currentCapacity + 2, totalPeople + 2))
+      .sort((a, b) => {
+        const sameAreaA = currentTable && a.area === currentTable.area ? 0 : 1;
+        const sameAreaB = currentTable && b.area === currentTable.area ? 0 : 1;
+        const capacityA = Math.abs(getTableCapacity(a) - currentCapacity);
+        const capacityB = Math.abs(getTableCapacity(b) - currentCapacity);
+        return sameAreaA - sameAreaB || capacityA - capacityB;
+      });
+
+    const suggestions: ChangeSuggestion[] = [];
+
+    for (const table of similarTables) {
+      const conflicts = conflictsForTable(table, target);
+
+      if (conflicts.length === 0) {
+        suggestions.push({
+          table,
+          kind: "free",
+          message: `Spostamento autorizzato: ${table.label} è libero nella fascia di ${target.name}.`,
+        });
+        continue;
+      }
+
+      const movableConflict = conflicts.length === 1 ? conflicts[0] : null;
+      if (
+        movableConflict &&
+        currentTable &&
+        movableConflict.status === "confermata" &&
+        !hasStrongPreference(movableConflict) &&
+        canMoveOtherReservationToOldTable(movableConflict, currentTable, target)
+      ) {
+        suggestions.push({
+          table,
+          kind: "swap",
+          swapReservation: movableConflict,
+          message: `Spostamento possibile con scambio: ${target.name} va a ${table.label}, ${movableConflict.name} viene spostato a ${currentTable.label}.`,
+        });
+      }
+    }
+
+    if (suggestions.length === 0) {
+      return [{
+        table: currentTable || BASE_TABLES[0],
+        kind: "director",
+        message: "Il sistema non autorizza uno spostamento sicuro: chiedere al direttore di sala.",
+      }];
+    }
+
+    return suggestions.slice(0, 4);
+  }
+
+  async function applyChangeSuggestion(target: Reservation, suggestion: ChangeSuggestion) {
+    if (suggestion.kind === "director") return;
+
+    const currentTable = findCurrentBaseTable(target);
+    const newTargetModules = getBaseModuleIds(suggestion.table);
+    const oldTargetModules = currentTable ? getBaseModuleIds(currentTable) : target.moduleIds;
+
+    const updated = reservations.map((r) => {
+      if (r.id === target.id) {
+        return {
+          ...r,
+          table: suggestion.table.label,
+          optionId: suggestion.table.id,
+          moduleIds: newTargetModules,
+          notes: `${r.notes || ""}${r.notes ? " · " : ""}Spostato da accoglienza a ${suggestion.table.label}`,
+        };
+      }
+
+      if (suggestion.kind === "swap" && suggestion.swapReservation && r.id === suggestion.swapReservation.id && currentTable) {
+        return {
+          ...r,
+          table: currentTable.label,
+          optionId: currentTable.id,
+          moduleIds: oldTargetModules,
+          notes: `${r.notes || ""}${r.notes ? " · " : ""}Spostato automaticamente per cambio posto di ${target.name}`,
+        };
+      }
+
+      return r;
+    });
+
+    setReservations(updated);
+    await saveReservations(updated);
+    setChangeRequestId(null);
+  }
 
   async function updateStatus(id: number, status: Status) {
     const updated = reservations.map((r) =>
@@ -356,6 +523,101 @@ export default function ServizioPage() {
             </button>
           </div>
         </div>
+
+        <section className="bg-white border rounded-2xl p-5">
+          <h2 className="text-2xl font-bold mb-3">Cerca prenotazione</h2>
+          <div className="flex flex-col md:flex-row gap-3">
+            <input
+              className="border rounded-xl px-4 py-3 text-lg flex-1"
+              placeholder="Cerca nome, telefono o tavolo..."
+              value={searchName}
+              onChange={(e) => setSearchName(e.target.value)}
+            />
+            {searchName && (
+              <button
+                onClick={() => {
+                  setSearchName("");
+                  setChangeRequestId(null);
+                }}
+                className="border rounded-xl px-4 py-3 bg-white font-semibold"
+              >
+                Pulisci
+              </button>
+            )}
+          </div>
+
+          {searchName.trim() && (
+            <div className="mt-4 space-y-3">
+              {searchedReservations.length === 0 && (
+                <div className="text-gray-500">Nessuna prenotazione trovata.</div>
+              )}
+
+              {searchedReservations.map((r) => {
+                const suggestions = changeRequestId === r.id ? getChangeSuggestions(r) : [];
+
+                return (
+                  <div key={r.id} className="border rounded-2xl p-4 bg-yellow-50 border-yellow-300">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div>
+                        <div className="text-2xl font-bold">{r.name} x{r.adults} · {r.time}</div>
+                        <div className="text-xl font-semibold">Accompagnare a: {r.table}</div>
+                        <div className="text-sm mt-1">
+                          Stato: {r.status} · {turnOf(r.time)}
+                          {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
+                        </div>
+                        {r.notes && <div className="text-sm mt-1">Note: {r.notes}</div>}
+                      </div>
+
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => updateStatus(r.id, "arrivato")}
+                          className="rounded-xl bg-black text-white px-5 py-3 font-semibold"
+                        >
+                          Arrivato
+                        </button>
+                        <button
+                          onClick={() => setChangeRequestId(changeRequestId === r.id ? null : r.id)}
+                          className="rounded-xl border bg-white px-5 py-3 font-semibold"
+                        >
+                          Vuole cambiare posto
+                        </button>
+                      </div>
+                    </div>
+
+                    {changeRequestId === r.id && (
+                      <div className="mt-4 rounded-xl bg-white/80 border p-3 space-y-2">
+                        <div className="font-bold">Soluzioni cambio posto</div>
+                        {suggestions.map((suggestion, index) => (
+                          <div key={`${suggestion.table.id}-${index}`} className="border rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div>
+                              <div className="font-semibold">
+                                {suggestion.kind === "director" ? "Chiedere al direttore di sala" : suggestion.table.label}
+                              </div>
+                              <div className="text-sm">{suggestion.message}</div>
+                            </div>
+
+                            {suggestion.kind !== "director" ? (
+                              <button
+                                onClick={() => applyChangeSuggestion(r, suggestion)}
+                                className="rounded-xl bg-black text-white px-4 py-2 font-semibold"
+                              >
+                                Registra spostamento
+                              </button>
+                            ) : (
+                              <div className="rounded-xl bg-red-100 text-red-900 px-4 py-2 font-semibold text-sm">
+                                Decisione manuale
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <div className="grid md:grid-cols-3 gap-4">
           <div className="bg-white border rounded-2xl p-5">
@@ -528,4 +790,3 @@ export default function ServizioPage() {
     </div>
   );
 }
-
