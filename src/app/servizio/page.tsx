@@ -5,6 +5,8 @@ import { supabase } from "@/lib/auth";
 import { loadReservations, saveReservations } from "@/lib/storage";
 
 type Status = "confermata" | "arrivato" | "seduto" | "in_uscita" | "pagato" | "liberato" | "no_show";
+type Consumption = "pinsa" | "cucina" | "misto" | "non_so";
+type Category = "normale" | "affezionato" | "molto_importante";
 
 type Reservation = {
   id: number;
@@ -14,11 +16,16 @@ type Reservation = {
   time: string;
   adults: number;
   highchairs: number;
+  category?: Category;
+  areaPreference?: string;
   table: string;
+  optionId?: string;
   moduleIds: string[];
   status: Status;
+  consumption?: Consumption;
   notes?: string;
   mode?: string;
+  seatedAt?: number;
 };
 
 type BaseTable = {
@@ -26,6 +33,8 @@ type BaseTable = {
   label: string;
   area: "SALA" | "SALETTA" | "DEHOR" | "MARCIAPIEDE" | "ESTERNO";
 };
+
+type TableVisualStatus = "libero" | "prenotato_dopo" | "prenotato_attesa" | "occupato";
 
 const BASE_TABLES: BaseTable[] = [
   { id: "sala-1", label: "1 sala", area: "SALA" },
@@ -73,6 +82,10 @@ function toMin(t: string) {
   return h * 60 + m;
 }
 
+function fromMin(v: number) {
+  return `${String(Math.floor(v / 60)).padStart(2, "0")}:${String(v % 60).padStart(2, "0")}`;
+}
+
 function nowMin() {
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes();
@@ -96,9 +109,10 @@ function minutesLabel(mins: number) {
   return `tra ${mins} min`;
 }
 
-function tableStatusClass(status: "libero" | "prenotato_dopo" | "occupato") {
+function tableStatusClass(status: TableVisualStatus) {
   if (status === "occupato") return "bg-red-100 border-red-300 text-red-950";
-  if (status === "prenotato_dopo") return "bg-yellow-100 border-yellow-300 text-yellow-950";
+  if (status === "prenotato_attesa") return "bg-yellow-100 border-yellow-300 text-yellow-950";
+  if (status === "prenotato_dopo") return "bg-white border-gray-300 text-gray-950";
   return "bg-green-100 border-green-300 text-green-950";
 }
 
@@ -112,10 +126,34 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/\+/g, " ").replace(/-/g, " ");
 }
 
+function getBaseModuleIds(table: BaseTable) {
+  if (table.id === "sala-1") return ["sala-1a", "sala-1b"];
+  if (table.id === "sala-5") return ["sala-5a", "sala-5b"];
+  if (table.id === "sala-6") return ["sala-6a", "sala-6b", "sala-6c"];
+
+  if (table.id === "saletta-1") return ["saletta-1a", "saletta-1b"];
+  if (table.id === "saletta-2") return ["saletta-2a", "saletta-2b"];
+  if (table.id === "saletta-3") return ["saletta-3a", "saletta-3b"];
+  if (table.id === "saletta-4") return ["saletta-4a", "saletta-4b"];
+
+  if (table.id === "dehor-4") return ["dehor-4a", "dehor-4b"];
+  if (table.id === "dehor-5") return ["dehor-5a", "dehor-5b"];
+  if (table.id === "dehor-6") return ["dehor-6a", "dehor-6b"];
+  if (table.id === "dehor-7") return ["dehor-7a", "dehor-7b"];
+  if (table.id === "dehor-8") return ["dehor-8a", "dehor-8b"];
+
+  return [table.id];
+}
+
 function reservationUsesTable(reservation: Reservation, table: BaseTable) {
+  const tableModules = getBaseModuleIds(table);
+  const reservationModules = reservation.moduleIds || [];
+
+  if (tableModules.some((moduleId) => reservationModules.includes(moduleId))) return true;
+
   const label = normalize(table.label);
   const tableText = normalize(reservation.table || "");
-  const moduleText = normalize((reservation.moduleIds || []).join(" "));
+  const moduleText = normalize(reservationModules.join(" "));
 
   if (tableText.includes(label)) return true;
   if (moduleText.includes(normalize(table.id))) return true;
@@ -124,6 +162,20 @@ function reservationUsesTable(reservation: Reservation, table: BaseTable) {
   const area = table.area.toLowerCase();
 
   return tableText.includes(number) && tableText.includes(area);
+}
+
+function isActiveReservation(r: Reservation) {
+  return r.status !== "liberato" && r.status !== "no_show";
+}
+
+function isOccupiedStatus(status: Status) {
+  return ["arrivato", "seduto", "in_uscita", "pagato"].includes(status);
+}
+
+function getEstimatedReleaseTime(r: Reservation) {
+  const start = toMin(r.time);
+  const duration = r.consumption === "cucina" ? 105 : r.consumption === "pinsa" ? 75 : 90;
+  return fromMin(start + duration + 10);
 }
 
 export default function ServizioPage() {
@@ -157,8 +209,10 @@ export default function ServizioPage() {
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       setNow(currentTimeLabel());
+      const data = await loadReservations();
+      setReservations(data || []);
     }, 30000);
 
     return () => clearInterval(interval);
@@ -170,33 +224,40 @@ export default function ServizioPage() {
       .sort((a, b) => toMin(a.time) - toMin(b.time));
   }, [reservations, selectedDate, now]);
 
-  const activeReservations = todayReservations.filter(
-    (r) => r.status !== "liberato" && r.status !== "no_show"
-  );
+  const activeReservations = todayReservations.filter(isActiveReservation);
 
   const upcoming = activeReservations
+    .filter((r) => !isOccupiedStatus(r.status))
     .filter((r) => toMin(r.time) >= nowMin() - 5 && toMin(r.time) <= nowMin() + 10)
     .sort((a, b) => toMin(a.time) - toMin(b.time));
 
   const tableRows = useMemo(() => {
+    const currentMinute = nowMin();
+
     return BASE_TABLES.map((table) => {
       const matches = activeReservations
         .filter((r) => reservationUsesTable(r, table))
         .sort((a, b) => toMin(a.time) - toMin(b.time));
 
-      const current = matches.find((r) => toMin(r.time) <= nowMin() + 20);
-      const secondTurn = matches.find((r) => toMin(r.time) >= toMin("21:00"));
+      const occupied = matches.find((r) => isOccupiedStatus(r.status));
+      const waitingNow = matches.find(
+        (r) => r.status === "confermata" && toMin(r.time) <= currentMinute + 20
+      );
+      const future = matches.find(
+        (r) => r.status === "confermata" && toMin(r.time) > currentMinute + 20
+      );
 
-      let status: "libero" | "prenotato_dopo" | "occupato" = "libero";
-      if (current && current.status === "arrivato") status = "occupato";
-      else if (current && toMin(current.time) <= nowMin() + 20) status = "occupato";
-      else if (secondTurn) status = "prenotato_dopo";
+      let status: TableVisualStatus = "libero";
+      if (occupied) status = "occupato";
+      else if (waitingNow) status = "prenotato_attesa";
+      else if (future) status = "prenotato_dopo";
 
       return {
         table,
         matches,
-        current,
-        secondTurn,
+        occupied,
+        waitingNow,
+        future,
         status,
       };
     });
@@ -220,9 +281,36 @@ export default function ServizioPage() {
 
   async function updateStatus(id: number, status: Status) {
     const updated = reservations.map((r) =>
-      r.id === id ? { ...r, status } : r
+      r.id === id ? { ...r, status, seatedAt: status === "seduto" ? Date.now() : r.seatedAt } : r
     );
 
+    setReservations(updated);
+    await saveReservations(updated);
+  }
+
+  async function occupyTableNow(table: BaseTable) {
+    const time = currentTimeLabel();
+    const newReservation: Reservation = {
+      id: Date.now(),
+      date: selectedDate,
+      name: "Passaggio",
+      phone: "",
+      time,
+      adults: 2,
+      highchairs: 0,
+      category: "normale",
+      areaPreference: "nessuna",
+      table: table.label,
+      optionId: table.id,
+      moduleIds: getBaseModuleIds(table),
+      status: "seduto",
+      consumption: "non_so",
+      notes: "Inserito dalla modalità servizio",
+      mode: "passaggio",
+      seatedAt: Date.now(),
+    };
+
+    const updated = [newReservation, ...reservations];
     setReservations(updated);
     await saveReservations(updated);
   }
@@ -338,7 +426,7 @@ export default function ServizioPage() {
             <div>
               <h2 className="text-2xl font-bold">Tutti i tavoli</h2>
               <p className="text-sm text-gray-500">
-                Verde libero · Giallo libero ora ma prenotato più tardi · Rosso occupato / da controllare
+                Verde libero tutta la sera · Bianco libero ora ma prenotato dopo · Giallo prenotato non ancora arrivato · Rosso occupato
               </p>
             </div>
 
@@ -362,9 +450,10 @@ export default function ServizioPage() {
                         <div>
                           <div className="text-xl font-bold">{table.label}</div>
                           <div className="text-sm font-medium">
-                            {status === "libero" && "LIBERO"}
+                            {status === "libero" && "LIBERO TUTTA LA SERA"}
                             {status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO DOPO"}
-                            {status === "occupato" && "OCCUPATO / DA CONTROLLARE"}
+                            {status === "prenotato_attesa" && "PRENOTATO · NON ANCORA ARRIVATO"}
+                            {status === "occupato" && "OCCUPATO"}
                           </div>
                         </div>
                       </div>
@@ -382,17 +471,24 @@ export default function ServizioPage() {
                                 {r.name} x{r.adults} · {r.time} · {turnOf(r.time)}
                               </div>
                               <div>
-                                Stato: {r.status} · {minutesLabel(mins)}
+                                Stato: {r.status} · {isOccupiedStatus(r.status) ? `libero stimato alle ${getEstimatedReleaseTime(r)}` : minutesLabel(mins)}
                                 {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
                               </div>
                               {r.notes && <div>Note: {r.notes}</div>}
 
-                              <div className="flex gap-2 mt-2">
+                              <div className="flex gap-2 mt-2 flex-wrap">
                                 <button
                                   onClick={() => updateStatus(r.id, "arrivato")}
                                   className="rounded-lg bg-black text-white px-3 py-2"
                                 >
                                   Arrivato
+                                </button>
+
+                                <button
+                                  onClick={() => updateStatus(r.id, "seduto")}
+                                  className="rounded-lg border bg-white px-3 py-2"
+                                >
+                                  Seduto
                                 </button>
 
                                 <button
@@ -405,6 +501,21 @@ export default function ServizioPage() {
                             </div>
                           );
                         })}
+
+                        {status !== "occupato" && (
+                          <button
+                            onClick={() => occupyTableNow(table)}
+                            className="mt-2 w-full rounded-xl bg-black text-white px-4 py-3 font-semibold"
+                          >
+                            Occupa ora · passaggio
+                          </button>
+                        )}
+
+                        {status === "occupato" && (
+                          <div className="text-xs font-medium mt-2 opacity-80">
+                            Tavolo occupato: per liberarlo usa il pulsante Liberato sulla prenotazione/passaggio.
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
