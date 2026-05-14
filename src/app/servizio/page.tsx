@@ -7,6 +7,8 @@ import { loadReservations, saveReservations } from "@/lib/storage";
 type Status = "confermata" | "arrivato" | "seduto" | "in_uscita" | "pagato" | "liberato" | "no_show";
 type Consumption = "pinsa" | "cucina" | "misto" | "non_so";
 type Category = "normale" | "affezionato" | "molto_importante";
+type TableFilter = "tutti" | "liberi" | "liberi_ora" | "occupati";
+type AreaFilter = "TUTTE" | "SALA" | "SALETTA" | "DEHOR" | "MARCIAPIEDE" | "ESTERNO";
 
 type Reservation = {
   id: number;
@@ -246,6 +248,8 @@ export default function ServizioPage() {
   const [changeRequestId, setChangeRequestId] = useState<number | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [lastSoundMessage, setLastSoundMessage] = useState("");
+  const [tableFilter, setTableFilter] = useState<TableFilter>("tutti");
+  const [areaFilter, setAreaFilter] = useState<AreaFilter>("TUTTE");
   const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -339,12 +343,28 @@ export default function ServizioPage() {
         occupied,
         booked,
         status,
+        capacity: getTableCapacity(table),
       };
-    });
+    }).sort((a, b) => a.capacity - b.capacity || a.table.label.localeCompare(b.table.label));
   }, [activeReservations, now]);
 
+  const freeAllNightCount = tableRows.filter((t) => t.status === "libero").length;
+  const freeNowCount = tableRows.filter((t) => t.status === "prenotato_dopo").length;
+  const occupiedCount = tableRows.filter((t) => t.status === "occupato").length;
+  const unavailableCount = tableRows.filter((t) => t.status !== "libero").length;
+
+  const visibleTableRows = useMemo(() => {
+    return tableRows.filter((row) => {
+      if (areaFilter !== "TUTTE" && row.table.area !== areaFilter) return false;
+      if (tableFilter === "liberi") return row.status === "libero";
+      if (tableFilter === "liberi_ora") return row.status === "libero" || row.status === "prenotato_dopo";
+      if (tableFilter === "occupati") return row.status === "occupato";
+      return true;
+    });
+  }, [tableRows, tableFilter, areaFilter]);
+
   const groupedTables = useMemo(() => {
-    const groups: Record<string, typeof tableRows> = {
+    const groups: Record<string, typeof visibleTableRows> = {
       SALA: [],
       SALETTA: [],
       DEHOR: [],
@@ -352,11 +372,21 @@ export default function ServizioPage() {
       ESTERNO: [],
     };
 
-    tableRows.forEach((row) => {
+    visibleTableRows.forEach((row) => {
       groups[row.table.area].push(row);
     });
 
     return groups;
+  }, [visibleTableRows]);
+
+  const bestPassageTables = useMemo(() => {
+    return tableRows
+      .filter((row) => row.status === "libero" || row.status === "prenotato_dopo")
+      .sort((a, b) => {
+        if (a.status !== b.status) return a.status === "libero" ? -1 : 1;
+        return a.capacity - b.capacity;
+      })
+      .slice(0, 8);
   }, [tableRows]);
 
   function findCurrentBaseTable(r: Reservation) {
@@ -558,32 +588,20 @@ export default function ServizioPage() {
           </div>
         </div>
 
-        <section className="bg-white border rounded-2xl p-5">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <section className="bg-white border rounded-2xl p-5 border-blue-200">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3">
             <div>
-              <h2 className="text-2xl font-bold">Notifiche arrivi</h2>
-              <p className="text-sm text-gray-500">
-                Attiva il suono sul dispositivo. Su iPhone e Android serve premere il bottone almeno una volta.
-              </p>
-              {lastSoundMessage && <p className="text-sm font-semibold mt-2 text-green-800">Ultimo avviso: {lastSoundMessage}</p>}
+              <h2 className="text-2xl font-bold">Cerca prenotazione</h2>
+              <p className="text-sm text-gray-500">Prima cosa da usare quando arriva un cliente: nome, telefono o tavolo.</p>
             </div>
-
             <button
-              onClick={() => {
-                playArrivalSound();
-                if (navigator.vibrate) navigator.vibrate(150);
-                setSoundEnabled(true);
-                setLastSoundMessage("Audio attivato correttamente");
-              }}
-              className={`rounded-xl px-5 py-3 font-semibold ${soundEnabled ? "bg-green-700 text-white" : "bg-black text-white"}`}
+              onClick={() => setTableFilter("liberi_ora")}
+              className="rounded-xl bg-green-700 text-white px-5 py-3 font-semibold"
             >
-              {soundEnabled ? "Suono attivo" : "Attiva suono"}
+              Vedi tavoli liberi per passaggio
             </button>
           </div>
-        </section>
 
-        <section className="bg-white border rounded-2xl p-5">
-          <h2 className="text-2xl font-bold mb-3">Cerca prenotazione</h2>
           <div className="flex flex-col md:flex-row gap-3">
             <input
               className="border rounded-xl px-4 py-3 text-lg flex-1"
@@ -634,6 +652,12 @@ export default function ServizioPage() {
                           Arrivato
                         </button>
                         <button
+                          onClick={() => updateStatus(r.id, "seduto")}
+                          className="rounded-xl border bg-white px-5 py-3 font-semibold"
+                        >
+                          Seduto
+                        </button>
+                        <button
                           onClick={() => setChangeRequestId(changeRequestId === r.id ? null : r.id)}
                           className="rounded-xl border bg-white px-5 py-3 font-semibold"
                         >
@@ -677,24 +701,184 @@ export default function ServizioPage() {
           )}
         </section>
 
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="bg-white border rounded-2xl p-5">
-            <div className="text-sm text-gray-500">Prenotazioni attive</div>
-            <div className="text-3xl font-bold">{activeReservations.length}</div>
-          </div>
+        <div className="grid md:grid-cols-4 gap-4">
+          <button onClick={() => setTableFilter("liberi")} className={`text-left border rounded-2xl p-5 ${tableFilter === "liberi" ? "bg-green-700 text-white border-green-700" : "bg-white"}`}>
+            <div className="text-sm opacity-80">Liberi tutta la sera</div>
+            <div className="text-3xl font-bold">{freeAllNightCount}</div>
+          </button>
 
-          <div className="bg-white border rounded-2xl p-5">
-            <div className="text-sm text-gray-500">Arrivi entro 10 minuti</div>
-            <div className="text-3xl font-bold">{upcoming.length}</div>
-          </div>
+          <button onClick={() => setTableFilter("liberi_ora")} className={`text-left border rounded-2xl p-5 ${tableFilter === "liberi_ora" ? "bg-yellow-500 text-white border-yellow-500" : "bg-white"}`}>
+            <div className="text-sm opacity-80">Liberi ora per passaggio</div>
+            <div className="text-3xl font-bold">{freeAllNightCount + freeNowCount}</div>
+          </button>
 
-          <div className="bg-white border rounded-2xl p-5">
-            <div className="text-sm text-gray-500">Tavoli occupati / prenotati</div>
-            <div className="text-3xl font-bold">
-              {tableRows.filter((t) => t.status !== "libero").length}
+          <button onClick={() => setTableFilter("occupati")} className={`text-left border rounded-2xl p-5 ${tableFilter === "occupati" ? "bg-red-700 text-white border-red-700" : "bg-white"}`}>
+            <div className="text-sm opacity-80">Occupati</div>
+            <div className="text-3xl font-bold">{occupiedCount}</div>
+          </button>
+
+          <button onClick={() => setTableFilter("tutti")} className={`text-left border rounded-2xl p-5 ${tableFilter === "tutti" ? "bg-black text-white border-black" : "bg-white"}`}>
+            <div className="text-sm opacity-80">Tutti i tavoli</div>
+            <div className="text-3xl font-bold">{BASE_TABLES.length}</div>
+          </button>
+        </div>
+
+        <section className="bg-white border rounded-2xl p-5 border-green-200">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-2xl font-bold">Passaggio veloce</h2>
+              <p className="text-sm text-gray-500">I migliori tavoli disponibili ora, ordinati per non sprecare tavoli grandi.</p>
+            </div>
+            <div className="text-sm font-semibold text-green-800">
+              {freeAllNightCount + freeNowCount} tavoli utilizzabili ora
             </div>
           </div>
-        </div>
+
+          <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {bestPassageTables.length === 0 && <div className="text-gray-500">Nessun tavolo disponibile ora.</div>}
+            {bestPassageTables.map(({ table, status, booked, capacity }) => (
+              <div key={table.id} className={`border rounded-2xl p-4 ${tableStatusClass(status)}`}>
+                <div className="flex justify-between gap-2">
+                  <div>
+                    <div className="text-xl font-bold">{table.label}</div>
+                    <div className="text-sm font-semibold">{capacity} posti · {table.area}</div>
+                  </div>
+                </div>
+                <div className="text-sm mt-2">
+                  {status === "libero" && "Libero tutta la sera"}
+                  {status === "prenotato_dopo" && booked && `Libero ora · prenotato alle ${booked.time} da ${booked.name}`}
+                </div>
+                <button
+                  onClick={() => occupyTableNow(table)}
+                  className="mt-3 w-full rounded-xl bg-black text-white px-4 py-3 font-semibold"
+                >
+                  Occupa ora · passaggio
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-white border rounded-2xl p-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-2xl font-bold">Tavoli</h2>
+              <p className="text-sm text-gray-500">
+                Verde libero tutta la sera · Giallo libero ora ma prenotato più tardi · Rosso occupato
+              </p>
+            </div>
+
+            <div className="flex gap-2 flex-wrap">
+              <select className="border rounded-xl px-3 py-2 bg-white" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value as AreaFilter)}>
+                <option value="TUTTE">Tutte le aree</option>
+                <option value="SALA">Sala</option>
+                <option value="SALETTA">Saletta</option>
+                <option value="DEHOR">Dehor</option>
+                <option value="MARCIAPIEDE">Marciapiede</option>
+                <option value="ESTERNO">Esterno</option>
+              </select>
+              <button onClick={() => setTableFilter("tutti")} className={`border rounded-xl px-4 py-2 ${tableFilter === "tutti" ? "bg-black text-white" : "bg-white"}`}>Tutti</button>
+              <button onClick={() => setTableFilter("liberi")} className={`border rounded-xl px-4 py-2 ${tableFilter === "liberi" ? "bg-green-700 text-white" : "bg-white"}`}>Solo liberi</button>
+              <button onClick={() => setTableFilter("liberi_ora")} className={`border rounded-xl px-4 py-2 ${tableFilter === "liberi_ora" ? "bg-yellow-500 text-white" : "bg-white"}`}>Liberi ora</button>
+              <button onClick={() => setTableFilter("occupati")} className={`border rounded-xl px-4 py-2 ${tableFilter === "occupati" ? "bg-red-700 text-white" : "bg-white"}`}>Occupati</button>
+              <button onClick={() => window.print()} className="border rounded-xl px-4 py-2 bg-white">Stampa</button>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {Object.entries(groupedTables).map(([area, rows]) => {
+              if (rows.length === 0) return null;
+
+              return (
+                <div key={area}>
+                  <h3 className="text-xl font-bold mb-3">{area}</h3>
+
+                  <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {rows.map(({ table, matches, status, capacity }) => (
+                      <div key={table.id} className={`border rounded-2xl p-4 ${tableStatusClass(status)}`}>
+                        <div className="flex justify-between gap-2">
+                          <div>
+                            <div className="text-xl font-bold">{table.label}</div>
+                            <div className="text-sm font-medium">
+                              {status === "libero" && "LIBERO TUTTA LA SERA"}
+                              {status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO PIÙ TARDI"}
+                              {status === "occupato" && "OCCUPATO"}
+                            </div>
+                            <div className="text-xs mt-1 opacity-80">Capienza rapida: {capacity} posti</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                          {matches.length === 0 && (
+                            <div className="text-sm opacity-80">Nessuna prenotazione su questo tavolo.</div>
+                          )}
+
+                          {matches.map((r) => {
+                            const mins = toMin(r.time) - nowMin();
+                            return (
+                              <div key={r.id} className="bg-white/70 rounded-xl p-2 text-sm">
+                                <div className="font-semibold">
+                                  {r.name} x{r.adults} · {r.time} · {turnOf(r.time)}
+                                </div>
+                                <div>
+                                  Stato: {r.status} · {isOccupiedStatus(r.status) ? `libero stimato alle ${getEstimatedReleaseTime(r)}` : minutesLabel(mins)}
+                                  {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
+                                </div>
+                                {r.notes && <div>Note: {r.notes}</div>}
+
+                                <div className="flex gap-2 mt-2 flex-wrap">
+                                  <button
+                                    onClick={() => updateStatus(r.id, "arrivato")}
+                                    className="rounded-lg bg-black text-white px-3 py-2"
+                                  >
+                                    Arrivato
+                                  </button>
+
+                                  <button
+                                    onClick={() => updateStatus(r.id, "seduto")}
+                                    className="rounded-lg border bg-white px-3 py-2"
+                                  >
+                                    Seduto
+                                  </button>
+
+                                  <button
+                                    onClick={() => updateStatus(r.id, "liberato")}
+                                    className="rounded-lg border bg-white px-3 py-2"
+                                  >
+                                    Liberato
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {status !== "occupato" && (
+                            <button
+                              onClick={() => occupyTableNow(table)}
+                              className="mt-2 w-full rounded-xl bg-black text-white px-4 py-3 font-semibold"
+                            >
+                              Occupa ora · passaggio
+                            </button>
+                          )}
+
+                          {status === "occupato" && (
+                            <div className="text-xs font-medium mt-2 opacity-80">
+                              Tavolo occupato: per liberarlo usa il pulsante Liberato sulla prenotazione/passaggio.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {visibleTableRows.length === 0 && (
+              <div className="text-gray-500 border rounded-xl p-4 bg-gray-50">Nessun tavolo con questi filtri.</div>
+            )}
+          </div>
+        </section>
 
         <section className="bg-white border rounded-2xl p-5">
           <h2 className="text-2xl font-bold mb-4">Arrivi imminenti</h2>
@@ -742,110 +926,32 @@ export default function ServizioPage() {
         </section>
 
         <section className="bg-white border rounded-2xl p-5">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
-              <h2 className="text-2xl font-bold">Tutti i tavoli</h2>
+              <h2 className="text-2xl font-bold">Notifiche arrivi</h2>
               <p className="text-sm text-gray-500">
-                Verde libero tutta la sera · Giallo libero ora ma prenotato più tardi · Rosso occupato
+                Attiva il suono sul dispositivo. Su iPhone e Android serve premere il bottone almeno una volta.
               </p>
+              {lastSoundMessage && <p className="text-sm font-semibold mt-2 text-green-800">Ultimo avviso: {lastSoundMessage}</p>}
             </div>
 
             <button
-              onClick={() => window.print()}
-              className="border rounded-xl px-4 py-2 bg-white"
+              onClick={() => {
+                playArrivalSound();
+                if (navigator.vibrate) navigator.vibrate(150);
+                setSoundEnabled(true);
+                setLastSoundMessage("Audio attivato correttamente");
+              }}
+              className={`rounded-xl px-5 py-3 font-semibold ${soundEnabled ? "bg-green-700 text-white" : "bg-black text-white"}`}
             >
-              Stampa
+              {soundEnabled ? "Suono attivo" : "Attiva suono"}
             </button>
-          </div>
-
-          <div className="space-y-6">
-            {Object.entries(groupedTables).map(([area, rows]) => (
-              <div key={area}>
-                <h3 className="text-xl font-bold mb-3">{area}</h3>
-
-                <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {rows.map(({ table, matches, status }) => (
-                    <div key={table.id} className={`border rounded-2xl p-4 ${tableStatusClass(status)}`}>
-                      <div className="flex justify-between gap-2">
-                        <div>
-                          <div className="text-xl font-bold">{table.label}</div>
-                          <div className="text-sm font-medium">
-                            {status === "libero" && "LIBERO TUTTA LA SERA"}
-                            {status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO PIÙ TARDI"}
-                            {status === "occupato" && "OCCUPATO"}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {matches.length === 0 && (
-                          <div className="text-sm opacity-80">Nessuna prenotazione su questo tavolo.</div>
-                        )}
-
-                        {matches.map((r) => {
-                          const mins = toMin(r.time) - nowMin();
-                          return (
-                            <div key={r.id} className="bg-white/70 rounded-xl p-2 text-sm">
-                              <div className="font-semibold">
-                                {r.name} x{r.adults} · {r.time} · {turnOf(r.time)}
-                              </div>
-                              <div>
-                                Stato: {r.status} · {isOccupiedStatus(r.status) ? `libero stimato alle ${getEstimatedReleaseTime(r)}` : minutesLabel(mins)}
-                                {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
-                              </div>
-                              {r.notes && <div>Note: {r.notes}</div>}
-
-                              <div className="flex gap-2 mt-2 flex-wrap">
-                                <button
-                                  onClick={() => updateStatus(r.id, "arrivato")}
-                                  className="rounded-lg bg-black text-white px-3 py-2"
-                                >
-                                  Arrivato
-                                </button>
-
-                                <button
-                                  onClick={() => updateStatus(r.id, "seduto")}
-                                  className="rounded-lg border bg-white px-3 py-2"
-                                >
-                                  Seduto
-                                </button>
-
-                                <button
-                                  onClick={() => updateStatus(r.id, "liberato")}
-                                  className="rounded-lg border bg-white px-3 py-2"
-                                >
-                                  Liberato
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {status !== "occupato" && (
-                          <button
-                            onClick={() => occupyTableNow(table)}
-                            className="mt-2 w-full rounded-xl bg-black text-white px-4 py-3 font-semibold"
-                          >
-                            Occupa ora · passaggio
-                          </button>
-                        )}
-
-                        {status === "occupato" && (
-                          <div className="text-xs font-medium mt-2 opacity-80">
-                            Tavolo occupato: per liberarlo usa il pulsante Liberato sulla prenotazione/passaggio.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
           </div>
         </section>
       </div>
     </div>
   );
 }
+
 
 
