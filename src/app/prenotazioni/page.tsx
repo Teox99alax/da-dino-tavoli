@@ -45,6 +45,7 @@ type FormState = {
 
 const QUICK_TIMES = ["19:15", "19:30", "19:45", "21:00", "21:15", "21:30"];
 const AREAS: Area[] = ["sala", "saletta", "dehor", "marciapiede", "esterno"];
+const TOTAL_CAPACITY = 27 + 18 + 30 + 15 + 36;
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -99,7 +100,9 @@ export default function PrenotazioniPage() {
 
   useEffect(() => {
     async function checkLogin() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!session) {
         window.location.href = "/login";
@@ -107,16 +110,10 @@ export default function PrenotazioniPage() {
       }
 
       setEmail(session.user.email || "");
-
       const role = await getCurrentUserRole();
 
-      if (role === "admin") {
-        return;
-      }
-
-      if (role !== "telefonista") {
-        window.location.href = "/servizio";
-      }
+      if (role === "admin") return;
+      if (role !== "telefonista") window.location.href = "/servizio";
     }
 
     checkLogin();
@@ -153,27 +150,27 @@ export default function PrenotazioniPage() {
     return activeReservations.filter((r) => getTurn(r.time) === "fuori turno");
   }, [activeReservations]);
 
-  const totalCapacity = 27 + 18 + 30 + 15 + 36;
   const firstTurnBooked = firstTurn.reduce((sum, r) => sum + Number(r.adults || 0), 0);
   const secondTurnBooked = secondTurn.reduce((sum, r) => sum + Number(r.adults || 0), 0);
-  const firstTurnFree = Math.max(totalCapacity - firstTurnBooked, 0);
-  const secondTurnFree = Math.max(totalCapacity - secondTurnBooked, 0);
+  const firstTurnFree = Math.max(TOTAL_CAPACITY - firstTurnBooked, 0);
+  const secondTurnFree = Math.max(TOTAL_CAPACITY - secondTurnBooked, 0);
 
   const filteredReservations = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return dayReservations;
 
-    return dayReservations.filter((r) =>
-      (r.name || "").toLowerCase().includes(q) ||
-      (r.phone || "").toLowerCase().includes(q) ||
-      (r.time || "").toLowerCase().includes(q)
-    );
+    return dayReservations.filter((r) => {
+      return (
+        (r.name || "").toLowerCase().includes(q) ||
+        (r.phone || "").toLowerCase().includes(q) ||
+        (r.time || "").toLowerCase().includes(q)
+      );
+    });
   }, [dayReservations, search]);
 
   const possibleDuplicate = useMemo(() => {
     const name = form.name.trim().toLowerCase();
     const phone = form.phone.trim().toLowerCase();
-
     if (!name && !phone) return null;
 
     return activeReservations.find((r) => {
@@ -202,7 +199,7 @@ export default function PrenotazioniPage() {
       const newReservation: Reservation = {
         id: Date.now(),
         date: selectedDate,
-        name: form.name.trim() || "Senza nome",
+        name: form.name.trim(),
         phone: form.phone.trim(),
         time: form.time,
         adults: Number(form.adults || 1),
@@ -222,7 +219,6 @@ export default function PrenotazioniPage() {
       const updated = [newReservation, ...reservations];
       setReservations(updated);
       await saveReservations(updated);
-
       setForm(makeEmptyForm());
       setMessage("Prenotazione salvata: tavolo da assegnare.");
     } catch (error) {
@@ -243,7 +239,7 @@ export default function PrenotazioniPage() {
       <div className="max-w-5xl mx-auto space-y-5">
         <div className="flex flex-col md:flex-row justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold">Da Dino · Prenotazioni</h1>
+            <h1 className="text-3xl font-bold">Da Dino - Prenotazioni</h1>
             <p className="text-gray-500">Accesso telefonista: {email}</p>
           </div>
 
@@ -254,11 +250,7 @@ export default function PrenotazioniPage() {
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
             />
-
-            <button
-              onClick={logout}
-              className="border rounded-xl px-4 py-2 bg-white"
-            >
+            <button onClick={logout} className="border rounded-xl px-4 py-2 bg-white">
               Esci
             </button>
           </div>
@@ -266,13 +258,13 @@ export default function PrenotazioniPage() {
 
         <div className="grid md:grid-cols-3 gap-3">
           <div className="bg-white border rounded-2xl p-5">
-            <div className="text-sm text-gray-500">Posti rimasti 1° turno</div>
+            <div className="text-sm text-gray-500">Posti rimasti 1 turno</div>
             <div className="text-4xl font-bold">{firstTurnFree}</div>
             <div className="text-xs text-gray-500 mt-1">Prenotati: {firstTurnBooked}</div>
           </div>
 
           <div className="bg-white border rounded-2xl p-5">
-            <div className="text-sm text-gray-500">Posti rimasti 2° turno</div>
+            <div className="text-sm text-gray-500">Posti rimasti 2 turno</div>
             <div className="text-4xl font-bold">{secondTurnFree}</div>
             <div className="text-xs text-gray-500 mt-1">Prenotati: {secondTurnBooked}</div>
           </div>
@@ -288,21 +280,21 @@ export default function PrenotazioniPage() {
           <div>
             <h2 className="text-2xl font-bold">Nuova prenotazione</h2>
             <p className="text-sm text-gray-500">
-              Questa pagina salva sempre il tavolo come “Da assegnare”. Matteo lo assegnerà dalla dashboard.
+              Questa pagina salva sempre il tavolo come Da assegnare. Matteo lo assegnera dalla dashboard.
             </p>
           </div>
 
-          {message && (
+          {message ? (
             <div className="border rounded-xl p-3 bg-yellow-50 text-yellow-900 font-medium">
               {message}
             </div>
-          )}
+          ) : null}
 
-          {possibleDuplicate && (
+          {possibleDuplicate ? (
             <div className="border rounded-xl p-3 bg-orange-50 text-orange-900">
-              Possibile doppione: {possibleDuplicate.time} · {possibleDuplicate.name} x{possibleDuplicate.adults} · {possibleDuplicate.table}
+              Possibile doppione: {possibleDuplicate.time} - {possibleDuplicate.name} x{possibleDuplicate.adults} - {possibleDuplicate.table}
             </div>
-          )}
+          ) : null}
 
           <div className="grid md:grid-cols-2 gap-3">
             <input
@@ -311,7 +303,6 @@ export default function PrenotazioniPage() {
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
-
             <input
               className="border rounded-xl p-4 text-lg"
               placeholder="Telefono"
@@ -384,7 +375,9 @@ export default function PrenotazioniPage() {
             >
               <option value="nessuna">Nessuna preferenza area</option>
               {AREAS.map((area) => (
-                <option key={area} value={area}>{area}</option>
+                <option key={area} value={area}>
+                  {area}
+                </option>
               ))}
             </select>
 
@@ -420,9 +413,8 @@ export default function PrenotazioniPage() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="text-2xl font-bold">Prenotazioni del giorno</h2>
-              <p className="text-sm text-gray-500">Include anche quelle già assegnate da Matteo.</p>
+              <p className="text-sm text-gray-500">Include anche quelle gia assegnate da Matteo.</p>
             </div>
-
             <input
               className="border rounded-xl p-3"
               placeholder="Cerca nome, telefono, orario..."
@@ -432,21 +424,24 @@ export default function PrenotazioniPage() {
           </div>
 
           <div className="space-y-2">
-            {filteredReservations.length === 0 && (
+            {filteredReservations.length === 0 ? (
               <div className="text-gray-500">Nessuna prenotazione per questa data.</div>
-            )}
+            ) : null}
 
             {filteredReservations.map((r) => (
-              <div key={r.id} className="border rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div
+                key={r.id}
+                className="border rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3"
+              >
                 <div>
                   <div className="text-lg font-bold">
-                    {r.time} · {r.name} x{r.adults}
+                    {r.time} - {r.name} x{r.adults}
                   </div>
                   <div className="text-sm text-gray-600">
-                    {r.phone || "Senza telefono"} · {getTurn(r.time)} · {r.table}
-                    {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
+                    {r.phone || "Senza telefono"} - {getTurn(r.time)} - {r.table}
+                    {r.highchairs ? ` - ${r.highchairs} seggiolone` : ""}
                   </div>
-                  {r.notes && <div className="text-xs mt-1">Note: {r.notes}</div>}
+                  {r.notes ? <div className="text-xs mt-1">Note: {r.notes}</div> : null}
                 </div>
 
                 <span className={`text-xs px-3 py-2 rounded-full font-medium ${statusClass(r.status)}`}>
@@ -461,9 +456,3 @@ export default function PrenotazioniPage() {
   );
 }
 
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
