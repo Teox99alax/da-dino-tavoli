@@ -9,6 +9,7 @@ type Consumption = "pinsa" | "cucina" | "misto" | "non_so";
 type Category = "normale" | "affezionato" | "molto_importante";
 type TableFilter = "tutti" | "liberi" | "liberi_ora" | "occupati";
 type AreaFilter = "TUTTE" | "SALA" | "SALETTA" | "DEHOR" | "MARCIAPIEDE" | "ESTERNO";
+type MapTurn = "primo" | "secondo";
 
 type Reservation = {
   id: number;
@@ -75,7 +76,7 @@ const BASE_TABLES: BaseTable[] = [
   { id: "marciapiede-14", label: "14 marciapiede", area: "MARCIAPIEDE" },
   { id: "marciapiede-15", label: "15 marciapiede", area: "MARCIAPIEDE" },
 
-  ...Array.from({ length: 15 }, (_, i) => ({
+  ...Array.from({ length: 12 }, (_, i) => ({
     id: `esterno-${i + 1}`,
     label: `${i + 1} esterno`,
     area: "ESTERNO" as const,
@@ -109,6 +110,34 @@ function currentTimeLabel() {
 
 function turnOf(time: string) {
   return toMin(time) >= toMin("21:00") ? "2° turno" : "1° turno";
+}
+
+function mapTurnOf(time: string): MapTurn {
+  return toMin(time) >= toMin("21:00") ? "secondo" : "primo";
+}
+
+function tableNumberFromLabel(label: string) {
+  return Number(label.split(" ")[0]) || 0;
+}
+
+function primaryNumberForReservation(r: Reservation, fallbackTable: BaseTable) {
+  const area = fallbackTable.area.toLowerCase();
+  const moduleNumbers = (r.moduleIds || [])
+    .filter((moduleId) => moduleId.toLowerCase().includes(area))
+    .map((moduleId) => {
+      const match = moduleId.match(/-(\d+)/);
+      return match ? Number(match[1]) : NaN;
+    })
+    .filter((n) => Number.isFinite(n));
+
+  if (moduleNumbers.length > 0) return String(Math.min(...moduleNumbers));
+
+  const labelMatch = (r.table || "").match(/(\d+)/);
+  return labelMatch ? labelMatch[1] : fallbackTable.label.split(" ")[0];
+}
+
+function peopleCount(r: Reservation) {
+  return Number(r.adults || 0) + Number(r.highchairs || 0);
 }
 
 function minutesLabel(mins: number) {
@@ -251,6 +280,7 @@ export default function ServizioPage() {
   const [tableFilter, setTableFilter] = useState<TableFilter>("tutti");
   const [areaFilter, setAreaFilter] = useState<AreaFilter>("TUTTE");
   const [selectedTable, setSelectedTable] = useState<any | null>(null);
+  const [mapTurn, setMapTurn] = useState<MapTurn>("primo");
   const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -327,27 +357,39 @@ export default function ServizioPage() {
 
   const tableRows = useMemo(() => {
     return BASE_TABLES.map((table) => {
-      const matches = activeReservations
+      const allMatches = activeReservations
         .filter((r) => reservationUsesTable(r, table))
         .sort((a, b) => toMin(a.time) - toMin(b.time));
 
-      const occupied = matches.find((r) => isOccupiedStatus(r.status));
-      const booked = matches.find((r) => r.status === "confermata");
+      const turnMatches = allMatches.filter((r) => mapTurnOf(r.time) === mapTurn);
+      const secondTurnMatches = allMatches.filter((r) => mapTurnOf(r.time) === "secondo");
+      const currentTurnOccupied = turnMatches.find((r) => isOccupiedStatus(r.status));
+      const currentTurnBooked = turnMatches.find((r) => r.status === "confermata");
+      const nextTurnBooked = mapTurn === "primo" ? secondTurnMatches.find((r) => r.status === "confermata" || isOccupiedStatus(r.status)) : undefined;
 
       let status: TableVisualStatus = "libero";
-      if (occupied) status = "occupato";
-      else if (booked) status = "prenotato_dopo";
+      if (currentTurnOccupied) status = "occupato";
+      else if (currentTurnBooked || nextTurnBooked) status = "prenotato_dopo";
+
+      const mainReservation = currentTurnOccupied || currentTurnBooked || nextTurnBooked || null;
+      const mustTurn = mapTurn === "primo" && !!(currentTurnOccupied || currentTurnBooked) && !!nextTurnBooked;
 
       return {
         table,
-        matches,
-        occupied,
-        booked,
+        matches: turnMatches,
+        allMatches,
+        secondTurnMatches,
+        occupied: currentTurnOccupied,
+        booked: currentTurnBooked,
+        nextTurnBooked,
+        mainReservation,
+        mustTurn,
+        displayNumber: mainReservation ? primaryNumberForReservation(mainReservation, table) : table.label.split(" ")[0],
         status,
         capacity: getTableCapacity(table),
       };
-    }).sort((a, b) => a.capacity - b.capacity || a.table.label.localeCompare(b.table.label));
-  }, [activeReservations, now]);
+    }).sort((a, b) => tableNumberFromLabel(a.table.label) - tableNumberFromLabel(b.table.label) || a.table.label.localeCompare(b.table.label));
+  }, [activeReservations, now, mapTurn]);
 
   const freeAllNightCount = tableRows.filter((t) => t.status === "libero").length;
   const freeNowCount = tableRows.filter((t) => t.status === "prenotato_dopo").length;
@@ -513,7 +555,7 @@ export default function ServizioPage() {
 
   async function updateStatus(id: number, status: Status) {
     const updated = reservations.map((r) =>
-      r.id === id ? { ...r, status, seatedAt: status === "seduto" ? Date.now() : r.seatedAt } : r
+      r.id === id ? { ...r, status, seatedAt: status === "arrivato" ? Date.now() : r.seatedAt } : r
     );
 
     setReservations(updated);
@@ -535,7 +577,7 @@ export default function ServizioPage() {
       table: table.label,
       optionId: table.id,
       moduleIds: getBaseModuleIds(table),
-      status: "seduto",
+      status: "arrivato",
       consumption: "non_so",
       notes: "Inserito dalla modalità servizio",
       mode: "passaggio",
@@ -653,10 +695,16 @@ export default function ServizioPage() {
                           Arrivato
                         </button>
                         <button
-                          onClick={() => updateStatus(r.id, "seduto")}
+                          onClick={() => updateStatus(r.id, "liberato")}
                           className="rounded-xl border bg-white px-5 py-3 font-semibold"
                         >
-                          Seduto
+                          Liberato
+                        </button>
+                        <button
+                          onClick={() => updateStatus(r.id, "no_show")}
+                          className="rounded-xl border bg-white px-5 py-3 font-semibold text-red-700"
+                        >
+                          No-show
                         </button>
                         <button
                           onClick={() => setChangeRequestId(changeRequestId === r.id ? null : r.id)}
@@ -765,11 +813,25 @@ export default function ServizioPage() {
             <div>
               <h2 className="text-2xl font-bold">Mappa sala live</h2>
               <p className="text-sm text-gray-500">
-                Verde libero tutta la sera · Giallo libero ora ma prenotato più tardi · Rosso occupato
+                Verde libero · Giallo prenotato più tardi · Rosso arrivato · ↻ deve girare
               </p>
             </div>
 
             <div className="flex gap-2 flex-wrap text-sm font-bold">
+              <button
+                onClick={() => setMapTurn("primo")}
+                className={`px-3 py-2 rounded-xl border ${mapTurn === "primo" ? "bg-black text-white" : "bg-white"}`}
+              >
+                1° turno
+              </button>
+
+              <button
+                onClick={() => setMapTurn("secondo")}
+                className={`px-3 py-2 rounded-xl border ${mapTurn === "secondo" ? "bg-black text-white" : "bg-white"}`}
+              >
+                2° turno
+              </button>
+
               <button
                 onClick={() => {
                   setTableFilter("tutti");
@@ -813,13 +875,12 @@ export default function ServizioPage() {
               <div className="col-span-8 bg-yellow-50 border border-yellow-200 rounded-3xl p-3">
                 <div className="flex items-center justify-between mb-3">
                   <div className="font-black text-lg">ESTERNO</div>
-                  <div className="text-xs text-gray-500 font-semibold">Tavoli 13/14/15 nascosti finché non montati</div>
+                  <div className="text-xs text-gray-500 font-semibold">{mapTurn === "primo" ? "1° turno" : "2° turno"}</div>
                 </div>
 
                 <div className="grid grid-cols-6 gap-2">
                   {visibleTableRows
                     .filter((row) => row.table.area === "ESTERNO")
-                    .filter((row) => !["esterno-13", "esterno-14", "esterno-15"].includes(row.table.id))
                     .slice()
                     .sort((a, b) => Number(a.table.label.split(" ")[0]) - Number(b.table.label.split(" ")[0]))
                     .map((row) => (
@@ -829,9 +890,15 @@ export default function ServizioPage() {
                         className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-2xl font-black leading-none">
-                          {row.table.label.split(" ")[0]}
+                          {row.displayNumber}{row.mustTurn ? " ↻" : ""}
                         </div>
-                        <div className="text-[10px] font-bold uppercase opacity-70">esterno</div>
+                        {row.mainReservation ? (
+                          <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
+                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] font-bold uppercase opacity-70">esterno</div>
+                        )}
                       </button>
                     ))}
                 </div>
@@ -852,9 +919,15 @@ export default function ServizioPage() {
                         className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-2xl font-black leading-none">
-                          {row.table.label.split(" ")[0]}
+                          {row.displayNumber}{row.mustTurn ? " ↻" : ""}
                         </div>
-                        <div className="text-[9px] font-bold uppercase opacity-70">marciap.</div>
+                        {row.mainReservation ? (
+                          <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
+                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] font-bold uppercase opacity-70">marciap.</div>
+                        )}
                       </button>
                     ))}
                 </div>
@@ -875,9 +948,15 @@ export default function ServizioPage() {
                         className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-2xl font-black leading-none">
-                          {row.table.label.split(" ")[0]}
+                          {row.displayNumber}{row.mustTurn ? " ↻" : ""}
                         </div>
-                        <div className="text-[10px] font-bold uppercase opacity-70">dehor</div>
+                        {row.mainReservation ? (
+                          <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
+                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] font-bold uppercase opacity-70">dehor</div>
+                        )}
                       </button>
                     ))}
                 </div>
@@ -898,9 +977,15 @@ export default function ServizioPage() {
                         className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-3xl font-black leading-none">
-                          {row.table.label.split(" ")[0]}
+                          {row.displayNumber}{row.mustTurn ? " ↻" : ""}
                         </div>
-                        <div className="text-[10px] font-bold uppercase opacity-70">saletta</div>
+                        {row.mainReservation ? (
+                          <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
+                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] font-bold uppercase opacity-70">saletta</div>
+                        )}
                       </button>
                     ))}
                 </div>
@@ -921,9 +1006,15 @@ export default function ServizioPage() {
                         className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-3xl font-black leading-none">
-                          {row.table.label.split(" ")[0]}
+                          {row.displayNumber}{row.mustTurn ? " ↻" : ""}
                         </div>
-                        <div className="text-[10px] font-bold uppercase opacity-70">sala</div>
+                        {row.mainReservation ? (
+                          <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
+                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] font-bold uppercase opacity-70">sala</div>
+                        )}
                       </button>
                     ))}
                 </div>
@@ -943,9 +1034,9 @@ export default function ServizioPage() {
             <div className="bg-white rounded-3xl w-full max-w-xl p-5 max-h-[90vh] overflow-auto shadow-2xl">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <div className="text-3xl font-black">{selectedTable.table.label}</div>
+                  <div className="text-3xl font-black">Tavolo {selectedTable.displayNumber} · {selectedTable.table.area}</div>
                   <div className="text-sm text-gray-500 mt-1">
-                    {selectedTable.capacity} posti · {selectedTable.table.area}
+                    {selectedTable.capacity} posti · riferimento reale: {selectedTable.table.label}
                   </div>
                   <div className={`inline-block mt-3 px-3 py-2 rounded-xl text-sm font-bold ${tableStatusClass(selectedTable.status)}`}>
                     {selectedTable.status === "libero" && "LIBERO TUTTA LA SERA"}
@@ -963,13 +1054,13 @@ export default function ServizioPage() {
               </div>
 
               <div className="space-y-3">
-                {selectedTable.matches.length === 0 && (
+                {selectedTable.allMatches.length === 0 && (
                   <div className="bg-green-50 border border-green-200 rounded-2xl p-4 font-semibold text-green-900">
                     Tavolo libero. Nessuna prenotazione su questo tavolo.
                   </div>
                 )}
 
-                {selectedTable.matches.map((r: Reservation) => {
+                {selectedTable.allMatches.map((r: Reservation) => {
                   const mins = toMin(r.time) - nowMin();
 
                   return (
@@ -982,6 +1073,12 @@ export default function ServizioPage() {
                         Stato: {r.status} · {turnOf(r.time)}
                         {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
                       </div>
+
+                      {r.phone && (
+                        <div className="text-sm mt-1">
+                          Tel: {r.phone}
+                        </div>
+                      )}
 
                       <div className="text-sm mt-1 text-gray-600">
                         {isOccupiedStatus(r.status)
@@ -1000,10 +1097,10 @@ export default function ServizioPage() {
                         </button>
 
                         <button
-                          onClick={() => updateStatus(r.id, "seduto")}
-                          className="rounded-xl border bg-white px-4 py-3 font-semibold"
+                          onClick={() => updateStatus(r.id, "no_show")}
+                          className="rounded-xl border bg-white px-4 py-3 font-semibold text-red-700"
                         >
-                          Seduto
+                          No-show
                         </button>
 
                         <button
@@ -1076,6 +1173,13 @@ export default function ServizioPage() {
                       className="rounded-xl border bg-white px-5 py-3 font-semibold"
                     >
                       Liberato
+                    </button>
+
+                    <button
+                      onClick={() => updateStatus(r.id, "no_show")}
+                      className="rounded-xl border bg-white px-5 py-3 font-semibold text-red-700"
+                    >
+                      No-show
                     </button>
                   </div>
                 </div>
