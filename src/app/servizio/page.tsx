@@ -37,7 +37,7 @@ type BaseTable = {
   area: "SALA" | "SALETTA" | "DEHOR" | "MARCIAPIEDE" | "ESTERNO";
 };
 
-type TableVisualStatus = "libero" | "prenotato_dopo" | "occupato";
+type TableVisualStatus = "libero" | "prenotato_dopo" | "prenotato_secondo" | "occupato";
 
 type ChangeSuggestion = {
   table: BaseTable;
@@ -167,6 +167,7 @@ function minutesLabel(mins: number) {
 
 function tableStatusClass(status: TableVisualStatus) {
   if (status === "occupato") return "bg-red-100 border-red-300 text-red-950";
+  if (status === "prenotato_secondo") return "bg-sky-100 border-sky-400 text-sky-950";
   if (status === "prenotato_dopo") return "bg-yellow-100 border-yellow-300 text-yellow-950";
   return "bg-green-100 border-green-300 text-green-950";
 }
@@ -395,7 +396,8 @@ export default function ServizioPage() {
 
       let status: TableVisualStatus = "libero";
       if (currentTurnOccupied) status = "occupato";
-      else if (currentTurnBooked || nextTurnBooked) status = "prenotato_dopo";
+      else if (currentTurnBooked) status = "prenotato_dopo";
+      else if (nextTurnBooked) status = "prenotato_secondo";
 
       const mainReservation = currentTurnOccupied || currentTurnBooked || nextTurnBooked || null;
       const mustTurn = mapTurn === "primo" && !!(currentTurnOccupied || currentTurnBooked) && !!nextTurnBooked;
@@ -418,7 +420,7 @@ export default function ServizioPage() {
   }, [activeReservations, now, mapTurn]);
 
   const freeAllNightCount = tableRows.filter((t) => t.status === "libero").length;
-  const freeNowCount = tableRows.filter((t) => t.status === "prenotato_dopo").length;
+  const freeNowCount = tableRows.filter((t) => t.status === "prenotato_dopo" || t.status === "prenotato_secondo").length;
   const occupiedCount = tableRows.filter((t) => t.status === "occupato").length;
   const unavailableCount = tableRows.filter((t) => t.status !== "libero").length;
 
@@ -426,7 +428,7 @@ export default function ServizioPage() {
     return tableRows.filter((row) => {
       if (areaFilter !== "TUTTE" && row.table.area !== areaFilter) return false;
       if (tableFilter === "liberi") return row.status === "libero";
-      if (tableFilter === "liberi_ora") return row.status === "libero" || row.status === "prenotato_dopo";
+      if (tableFilter === "liberi_ora") return row.status === "libero" || row.status === "prenotato_dopo" || row.status === "prenotato_secondo";
       if (tableFilter === "occupati") return row.status === "occupato";
       return true;
     });
@@ -450,7 +452,7 @@ export default function ServizioPage() {
 
   const bestPassageTables = useMemo(() => {
     return tableRows
-      .filter((row) => row.status === "libero" || row.status === "prenotato_dopo")
+      .filter((row) => row.status === "libero" || row.status === "prenotato_dopo" || row.status === "prenotato_secondo")
       .sort((a, b) => {
         if (a.status !== b.status) return a.status === "libero" ? -1 : 1;
         return a.capacity - b.capacity;
@@ -1298,6 +1300,7 @@ export default function ServizioPage() {
                 <div className="text-sm mt-2">
                   {status === "libero" && "Libero tutta la sera"}
                   {status === "prenotato_dopo" && booked && `Libero ora · prenotato alle ${booked.time} da ${booked.name}`}
+                  {status === "prenotato_secondo" && booked && `Libero al 1° · prenotato al 2° alle ${booked.time} da ${booked.name}`}
                 </div>
                 <button
                   onClick={() => occupyTableNow(table)}
@@ -1315,7 +1318,7 @@ export default function ServizioPage() {
             <div>
               <h2 className="text-2xl font-bold">Mappa sala live</h2>
               <p className="text-sm text-gray-500">
-                Verde libero · Giallo prenotato più tardi · Rosso arrivato · ↻ deve girare
+                Verde libero · Giallo prenotato nel turno selezionato · Azzurro libero al 1° ma prenotato al 2° · Rosso arrivato · ↻ deve girare
               </p>
             </div>
 
@@ -1480,7 +1483,7 @@ export default function ServizioPage() {
                         </div>
                         {row.mainReservation ? (
                           <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
-                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                            {row.mainReservation.time} · {row.mainReservation.name} x{peopleCount(row.mainReservation)}
                           </div>
                         ) : (
                           <div className="text-[10px] font-bold uppercase opacity-70">esterno</div>
@@ -1509,7 +1512,7 @@ export default function ServizioPage() {
                         </div>
                         {row.mainReservation ? (
                           <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
-                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                            {row.mainReservation.time} · {row.mainReservation.name} x{peopleCount(row.mainReservation)}
                           </div>
                         ) : (
                           <div className="text-[10px] font-bold uppercase opacity-70">marciap.</div>
@@ -1538,7 +1541,7 @@ export default function ServizioPage() {
                         </div>
                         {row.mainReservation ? (
                           <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
-                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                            {row.mainReservation.time} · {row.mainReservation.name} x{peopleCount(row.mainReservation)}
                           </div>
                         ) : (
                           <div className="text-[10px] font-bold uppercase opacity-70">dehor</div>
@@ -1567,7 +1570,7 @@ export default function ServizioPage() {
                         </div>
                         {row.mainReservation ? (
                           <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
-                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                            {row.mainReservation.time} · {row.mainReservation.name} x{peopleCount(row.mainReservation)}
                           </div>
                         ) : (
                           <div className="text-[10px] font-bold uppercase opacity-70">saletta</div>
@@ -1596,7 +1599,7 @@ export default function ServizioPage() {
                         </div>
                         {row.mainReservation ? (
                           <div className="text-[10px] font-black leading-tight mt-1 px-1 truncate">
-                            {row.mainReservation.name} x{peopleCount(row.mainReservation)}
+                            {row.mainReservation.time} · {row.mainReservation.name} x{peopleCount(row.mainReservation)}
                           </div>
                         ) : (
                           <div className="text-[10px] font-bold uppercase opacity-70">sala</div>
@@ -1680,6 +1683,7 @@ export default function ServizioPage() {
                   <div className={`inline-block mt-3 px-3 py-2 rounded-xl text-sm font-bold ${tableStatusClass(selectedTable.status)}`}>
                     {selectedTable.status === "libero" && "LIBERO TUTTA LA SERA"}
                     {selectedTable.status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO PIÙ TARDI"}
+                    {selectedTable.status === "prenotato_secondo" && "LIBERO AL 1° · PRENOTATO AL 2°"}
                     {selectedTable.status === "occupato" && "OCCUPATO"}
                   </div>
                 </div>
