@@ -820,6 +820,8 @@ export default function ServizioPage() {
                   {visibleTableRows
                     .filter((row) => row.table.area === "ESTERNO")
                     .filter((row) => !["esterno-13", "esterno-14", "esterno-15"].includes(row.table.id))
+                    .slice()
+                    .sort((a, b) => Number(a.table.label.split(" ")[0]) - Number(b.table.label.split(" ")[0]))
                     .map((row) => (
                       <button
                         key={row.table.id}
@@ -841,6 +843,8 @@ export default function ServizioPage() {
                 <div className="grid grid-cols-5 gap-2">
                   {visibleTableRows
                     .filter((row) => row.table.area === "MARCIAPIEDE")
+                    .slice()
+                    .sort((a, b) => Number(a.table.label.split(" ")[0]) - Number(b.table.label.split(" ")[0]))
                     .map((row) => (
                       <button
                         key={row.table.id}
@@ -862,6 +866,8 @@ export default function ServizioPage() {
                 <div className="grid grid-cols-5 gap-2">
                   {visibleTableRows
                     .filter((row) => row.table.area === "DEHOR")
+                    .slice()
+                    .sort((a, b) => Number(a.table.label.split(" ")[0]) - Number(b.table.label.split(" ")[0]))
                     .map((row) => (
                       <button
                         key={row.table.id}
@@ -883,6 +889,8 @@ export default function ServizioPage() {
                 <div className="grid grid-cols-2 gap-3">
                   {visibleTableRows
                     .filter((row) => row.table.area === "SALETTA")
+                    .slice()
+                    .sort((a, b) => Number(a.table.label.split(" ")[0]) - Number(b.table.label.split(" ")[0]))
                     .map((row) => (
                       <button
                         key={row.table.id}
@@ -904,6 +912,8 @@ export default function ServizioPage() {
                 <div className="grid grid-cols-3 gap-3">
                   {visibleTableRows
                     .filter((row) => row.table.area === "SALA")
+                    .slice()
+                    .sort((a, b) => Number(a.table.label.split(" ")[0]) - Number(b.table.label.split(" ")[0]))
                     .map((row) => (
                       <button
                         key={row.table.id}
