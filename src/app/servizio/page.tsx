@@ -46,6 +46,15 @@ type ChangeSuggestion = {
   swapReservation?: Reservation;
 };
 
+type MoveDestination = {
+  id: string;
+  label: string;
+  area: BaseTable["area"];
+  moduleIds: string[];
+  capacity: number;
+  tables: BaseTable[];
+};
+
 const BASE_TABLES: BaseTable[] = [
   { id: "sala-1", label: "1 sala", area: "SALA" },
   { id: "sala-2", label: "2 sala", area: "SALA" },
@@ -282,6 +291,7 @@ export default function ServizioPage() {
   const [selectedTable, setSelectedTable] = useState<any | null>(null);
   const [mapTurn, setMapTurn] = useState<MapTurn>("primo");
   const [moveReservation, setMoveReservation] = useState<Reservation | null>(null);
+  const [selectedMoveTables, setSelectedMoveTables] = useState<BaseTable[]>([]);
   const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -519,28 +529,79 @@ export default function ServizioPage() {
   }
 
 
-  function moveWarningDetails(target: Reservation, destination: BaseTable, swapReservation: Reservation | null, sourceTable: BaseTable | null) {
+  function makeMoveDestination(tables: BaseTable[]): MoveDestination | null {
+    if (tables.length === 0) return null;
+
+    const sorted = [...tables].sort((a, b) => {
+      if (a.area !== b.area) return a.area.localeCompare(b.area);
+      return tableNumberFromLabel(a.label) - tableNumberFromLabel(b.label);
+    });
+
+    const first = sorted[0];
+    const moduleIds = Array.from(new Set(sorted.flatMap((table) => getBaseModuleIds(table))));
+
+    return {
+      id: sorted.map((table) => table.id).join("+"),
+      label: `${first.label.split(" ")[0]} ${first.area.toLowerCase()}`,
+      area: first.area,
+      moduleIds,
+      capacity: sorted.reduce((sum, table) => sum + getTableCapacity(table), 0),
+      tables: sorted,
+    };
+  }
+
+  function conflictsForModules(moduleIds: string[], target: Reservation) {
+    const start = toMin(target.time);
+    const end = getEstimatedReleaseMin(target);
+
+    return activeReservations.filter((r) => {
+      if (r.id === target.id) return false;
+      if (!moduleIds.some((moduleId) => (r.moduleIds || []).includes(moduleId))) return false;
+      return overlap(start, end, toMin(r.time), getEstimatedReleaseMin(r));
+    });
+  }
+
+  function uniqueReservations(list: Reservation[]) {
+    const map = new Map<number, Reservation>();
+    list.forEach((r) => map.set(r.id, r));
+    return Array.from(map.values());
+  }
+
+  function sourceDestinationForTarget(target: Reservation): MoveDestination | null {
+    const usedTables = BASE_TABLES.filter((table) => reservationUsesTable(target, table));
+    if (usedTables.length > 0) return makeMoveDestination(usedTables);
+
+    const fallback = findCurrentBaseTable(target);
+    return fallback ? makeMoveDestination([fallback]) : null;
+  }
+
+  function moveWarningDetails(target: Reservation, destination: MoveDestination, swapReservation: Reservation | null, sourceDestination: MoveDestination | null) {
     const warnings: string[] = [];
 
-    if (!sourceTable) {
-      warnings.push(`Non riesco a riconoscere il tavolo attuale di ${target.name}. Lo spostamento va controllato manualmente.`);
+    if (!sourceDestination) {
+      warnings.push(`Non riesco a riconoscere con precisione il tavolo attuale di ${target.name}. Lo spostamento va controllato manualmente.`);
     }
 
-    if (getTableCapacity(destination) < peopleCount(target)) {
-      warnings.push(`${destination.label} ha capienza rapida ${getTableCapacity(destination)} posti, ma ${target.name} è da ${peopleCount(target)} persone.`);
+    const destinationAreas = Array.from(new Set(destination.tables.map((table) => table.area)));
+    if (destinationAreas.length > 1) {
+      warnings.push(`Hai selezionato tavoli di zone diverse (${destinationAreas.join(", ")}). Consiglio di usare tavoli della stessa zona per evitare confusione in sala.`);
     }
 
-    if (swapReservation && sourceTable) {
-      if (getTableCapacity(sourceTable) < peopleCount(swapReservation)) {
-        warnings.push(`${swapReservation.name} è da ${peopleCount(swapReservation)} persone: ${sourceTable.label} potrebbe essere stretto.`);
+    if (destination.capacity < peopleCount(target)) {
+      warnings.push(`${destination.label} ha capienza rapida ${destination.capacity} posti, ma ${target.name} è da ${peopleCount(target)} persone. Puoi forzare, ma controlla fisicamente la disposizione.`);
+    }
+
+    if (swapReservation && sourceDestination) {
+      if (sourceDestination.capacity < peopleCount(swapReservation)) {
+        warnings.push(`${swapReservation.name} è da ${peopleCount(swapReservation)} persone: ${sourceDestination.label} potrebbe essere stretto.`);
       }
 
       if (swapReservation.areaPreference && swapReservation.areaPreference !== "nessuna") {
         const requestedArea = String(swapReservation.areaPreference).toLowerCase();
-        if (requestedArea === destination.area.toLowerCase() && sourceTable.area !== destination.area) {
-          warnings.push(`${swapReservation.name} aveva chiesto/preferito la zona ${destination.area.toLowerCase()}: spostarla a ${sourceTable.label} potrebbe creare problemi all'arrivo.`);
-        } else if (requestedArea !== sourceTable.area.toLowerCase()) {
-          warnings.push(`${swapReservation.name} aveva preferenza ${requestedArea}: ${sourceTable.label} non rispetta questa preferenza.`);
+        if (requestedArea === destination.area.toLowerCase() && sourceDestination.area !== destination.area) {
+          warnings.push(`${swapReservation.name} aveva chiesto/preferito la zona ${destination.area.toLowerCase()}: spostarla a ${sourceDestination.label} potrebbe creare problemi all'arrivo.`);
+        } else if (requestedArea !== sourceDestination.area.toLowerCase()) {
+          warnings.push(`${swapReservation.name} aveva preferenza ${requestedArea}: ${sourceDestination.label} non rispetta questa preferenza.`);
         }
       }
 
@@ -554,21 +615,21 @@ export default function ServizioPage() {
       const swapEnd = getEstimatedReleaseMin(swapReservation);
       const sourceConflicts = activeReservations.filter((r) => {
         if (r.id === target.id || r.id === swapReservation.id) return false;
-        if (!reservationUsesTable(r, sourceTable)) return false;
+        if (!sourceDestination.moduleIds.some((moduleId) => (r.moduleIds || []).includes(moduleId))) return false;
         return overlap(swapStart, swapEnd, toMin(r.time), getEstimatedReleaseMin(r));
       });
 
       if (sourceConflicts.length > 0) {
-        warnings.push(`${sourceTable.label} non è pulito per ${swapReservation.name}: si sovrappone con ${sourceConflicts.map((r) => `${r.name} alle ${r.time}`).join(", ")}.`);
+        warnings.push(`${sourceDestination.label} non è pulito per ${swapReservation.name}: si sovrappone con ${sourceConflicts.map((r) => `${r.name} alle ${r.time}`).join(", ")}.`);
       }
 
       const secondTurnOnSource = activeReservations.find((r) => {
         if (r.id === target.id || r.id === swapReservation.id) return false;
-        return mapTurnOf(r.time) === "secondo" && reservationUsesTable(r, sourceTable);
+        return mapTurnOf(r.time) === "secondo" && sourceDestination.moduleIds.some((moduleId) => (r.moduleIds || []).includes(moduleId));
       });
 
       if (secondTurnOnSource && mapTurnOf(swapReservation.time) === "primo") {
-        warnings.push(`${sourceTable.label} deve girare al secondo turno per ${secondTurnOnSource.name} alle ${secondTurnOnSource.time}: attenzione ai tempi di uscita.`);
+        warnings.push(`${sourceDestination.label} deve girare al secondo turno per ${secondTurnOnSource.name} alle ${secondTurnOnSource.time}: attenzione ai tempi di uscita.`);
       }
     }
 
@@ -608,6 +669,7 @@ export default function ServizioPage() {
 
   function startManualMove(target: Reservation) {
     setMoveReservation(target);
+    setSelectedMoveTables([]);
     setSelectedTable(null);
     setChangeRequestId(null);
     const targetTurn = mapTurnOf(target.time);
@@ -616,38 +678,53 @@ export default function ServizioPage() {
     setAreaFilter("TUTTE");
   }
 
-  async function performManualMove(destination: BaseTable) {
+  function toggleMoveTable(table: BaseTable) {
+    setSelectedMoveTables((prev) => {
+      if (prev.some((t) => t.id === table.id)) return prev.filter((t) => t.id !== table.id);
+      return [...prev, table];
+    });
+  }
+
+  function isMoveTableSelected(table: BaseTable) {
+    return selectedMoveTables.some((t) => t.id === table.id);
+  }
+
+  async function performManualMoveMultiple() {
     if (!moveReservation) return;
 
-    const target = moveReservation;
-    const sourceTable = findCurrentBaseTable(target);
-
-    if (sourceTable && sourceTable.id === destination.id) {
-      alert(`${target.name} è già su ${destination.label}.`);
-      setMoveReservation(null);
+    const destination = makeMoveDestination(selectedMoveTables);
+    if (!destination) {
+      alert("Seleziona uno o più tavoli dalla mappa prima di confermare lo spostamento.");
       return;
     }
 
-    const destinationConflicts = conflictsForTable(destination, target);
+    const target = moveReservation;
+    const sourceDestination = sourceDestinationForTarget(target);
+
+    if (sourceDestination && sourceDestination.id === destination.id) {
+      alert(`${target.name} è già su ${destination.label}.`);
+      setMoveReservation(null);
+      setSelectedMoveTables([]);
+      return;
+    }
+
+    const destinationConflicts = uniqueReservations(conflictsForModules(destination.moduleIds, target));
 
     if (destinationConflicts.length > 1) {
-      alert(`Non posso fare lo scambio automatico: su ${destination.label} risultano più prenotazioni sovrapposte (${destinationConflicts.map((r) => r.name).join(", ")}). ${alternativeMoveMessage(target, [destination.id, sourceTable?.id || ""])}`);
+      alert(`Non posso fare lo scambio automatico: sui tavoli selezionati risultano più prenotazioni sovrapposte (${destinationConflicts.map((r) => r.name).join(", ")}). ${alternativeMoveMessage(target, [...selectedMoveTables.map((t) => t.id), ...(sourceDestination?.tables.map((t) => t.id) || [])])}`);
       return;
     }
 
     const swapReservation = destinationConflicts.length === 1 ? destinationConflicts[0] : null;
-    const warnings = moveWarningDetails(target, destination, swapReservation, sourceTable);
+    const warnings = moveWarningDetails(target, destination, swapReservation, sourceDestination);
 
     if (warnings.length > 0) {
-      const alternative = alternativeMoveMessage(target, [destination.id, sourceTable?.id || ""]);
+      const alternative = alternativeMoveMessage(target, [...selectedMoveTables.map((t) => t.id), ...(sourceDestination?.tables.map((t) => t.id) || [])]);
       const ok = window.confirm(
         `ATTENZIONE SPOSTAMENTO\n\n${warnings.join("\n\n")}\n\n${alternative}\n\nVuoi forzare comunque lo spostamento?`
       );
       if (!ok) return;
     }
-
-    const destinationModules = getBaseModuleIds(destination);
-    const sourceModules = sourceTable ? getBaseModuleIds(sourceTable) : target.moduleIds;
 
     const updated = reservations.map((r) => {
       if (r.id === target.id) {
@@ -655,17 +732,17 @@ export default function ServizioPage() {
           ...r,
           table: destination.label,
           optionId: destination.id,
-          moduleIds: destinationModules,
+          moduleIds: destination.moduleIds,
           notes: `${r.notes || ""}${r.notes ? " · " : ""}Spostato manualmente da sala a ${destination.label}`,
         };
       }
 
-      if (swapReservation && sourceTable && r.id === swapReservation.id) {
+      if (swapReservation && sourceDestination && r.id === swapReservation.id) {
         return {
           ...r,
-          table: sourceTable.label,
-          optionId: sourceTable.id,
-          moduleIds: sourceModules,
+          table: sourceDestination.label,
+          optionId: sourceDestination.id,
+          moduleIds: sourceDestination.moduleIds,
           notes: `${r.notes || ""}${r.notes ? " · " : ""}Spostato automaticamente per scambio con ${target.name}`,
         };
       }
@@ -676,12 +753,13 @@ export default function ServizioPage() {
     setReservations(updated);
     await saveReservations(updated);
     setMoveReservation(null);
+    setSelectedMoveTables([]);
     setSelectedTable(null);
   }
 
   function handleTableClick(row: any) {
     if (moveReservation) {
-      performManualMove(row.table);
+      toggleMoveTable(row.table);
       return;
     }
     setSelectedTable(row);
@@ -1051,17 +1129,33 @@ export default function ServizioPage() {
           {moveReservation && (
             <div className="mb-4 rounded-2xl border-2 border-blue-300 bg-blue-50 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
-                <div className="text-xl font-black text-blue-950">Spostamento manuale attivo</div>
+                <div className="text-xl font-black text-blue-950">Spostamento manuale multiplo attivo</div>
                 <div className="text-sm text-blue-900">
-                  Tocca sulla mappa il nuovo tavolo per {moveReservation.name} x{peopleCount(moveReservation)}. Se il tavolo è occupato, provo lo scambio automatico.
+                  Tocca uno o più tavoli sulla mappa per {moveReservation.name} x{peopleCount(moveReservation)}. Poi premi Conferma spostamento.
                 </div>
+                {selectedMoveTables.length > 0 && (
+                  <div className="text-sm font-bold text-blue-950 mt-1">
+                    Selezionati: {selectedMoveTables.map((table) => table.label).join(", ")}
+                  </div>
+                )}
               </div>
-              <button
-                onClick={() => setMoveReservation(null)}
-                className="rounded-xl border bg-white px-4 py-3 font-semibold"
-              >
-                Annulla spostamento
-              </button>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={performManualMoveMultiple}
+                  className="rounded-xl bg-blue-700 text-white px-4 py-3 font-semibold"
+                >
+                  Conferma spostamento
+                </button>
+                <button
+                  onClick={() => {
+                    setMoveReservation(null);
+                    setSelectedMoveTables([]);
+                  }}
+                  className="rounded-xl border bg-white px-4 py-3 font-semibold"
+                >
+                  Annulla spostamento
+                </button>
+              </div>
             </div>
           )}
 
@@ -1083,7 +1177,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
                       >
                         <div className="text-2xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1112,7 +1206,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
                       >
                         <div className="text-2xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1141,7 +1235,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
                       >
                         <div className="text-2xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1170,7 +1264,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
                       >
                         <div className="text-3xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1199,7 +1293,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
                       >
                         <div className="text-3xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
