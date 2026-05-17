@@ -55,6 +55,15 @@ type MoveDestination = {
   tables: BaseTable[];
 };
 
+type TurnInstruction = {
+  id: string;
+  priority: "alta" | "media" | "bassa";
+  title: string;
+  details: string[];
+  alternative?: string;
+  score: number;
+};
+
 const BASE_TABLES: BaseTable[] = [
   { id: "sala-1", label: "1 sala", area: "SALA" },
   { id: "sala-2", label: "2 sala", area: "SALA" },
@@ -195,19 +204,21 @@ function reservationUsesTable(reservation: Reservation, table: BaseTable) {
   const tableModules = getBaseModuleIds(table);
   const reservationModules = reservation.moduleIds || [];
 
-  if (tableModules.some((moduleId) => reservationModules.includes(moduleId))) return true;
+  // Regola principale: usare SOLO i moduli reali assegnati.
+  // Questo evita errori tipo 1 esterno che viene letto anche come 11/12 esterno.
+  if (reservationModules.length > 0) {
+    return tableModules.some((moduleId) => reservationModules.includes(moduleId));
+  }
 
-  const label = normalize(table.label);
-  const tableText = normalize(reservation.table || "");
-  const moduleText = normalize(reservationModules.join(" "));
+  // Fallback per vecchie prenotazioni senza moduleIds: confronto preciso, non contains largo.
+  const label = normalize(table.label).trim();
+  const tableText = normalize(reservation.table || "").trim();
 
-  if (tableText.includes(label)) return true;
-  if (moduleText.includes(normalize(table.id))) return true;
+  if (!tableText) return false;
+  if (tableText === label) return true;
 
-  const number = table.label.split(" ")[0];
-  const area = table.area.toLowerCase();
-
-  return tableText.includes(number) && tableText.includes(area);
+  const parts = tableText.split(/\s*\+\s*/).map((part) => part.trim());
+  return parts.includes(label);
 }
 
 function isActiveReservation(r: Reservation) {
@@ -295,6 +306,7 @@ export default function ServizioPage() {
   const [passageMode, setPassageMode] = useState(false);
   const [selectedPassageTables, setSelectedPassageTables] = useState<BaseTable[]>([]);
   const [passagePeople, setPassagePeople] = useState(2);
+  const [showTurnInstructions, setShowTurnInstructions] = useState(false);
   const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -445,6 +457,96 @@ export default function ServizioPage() {
       })
       .slice(0, 8);
   }, [tableRows]);
+
+  const turnInstructions = useMemo<TurnInstruction[]>(() => {
+    const firstTurnReservations = activeReservations.filter((r) => mapTurnOf(r.time) === "primo");
+    const secondTurnReservations = activeReservations.filter((r) => mapTurnOf(r.time) === "secondo");
+
+    const instructions: TurnInstruction[] = [];
+
+    secondTurnReservations.forEach((second) => {
+      const secondModules = second.moduleIds || [];
+      if (secondModules.length === 0) return;
+
+      const secondPeople = peopleCount(second);
+      const tables = BASE_TABLES.filter((table) => getBaseModuleIds(table).some((moduleId) => secondModules.includes(moduleId)));
+      const destination = makeMoveDestination(tables);
+      if (!destination) return;
+
+      const blockers = firstTurnReservations.filter((first) => {
+        if (first.id === second.id) return false;
+        return (first.moduleIds || []).some((moduleId) => secondModules.includes(moduleId));
+      });
+
+      const latestFirstReady = blockers.length > 0
+        ? Math.max(...blockers.map((r) => getEstimatedReleaseMin(r)))
+        : 0;
+      const secondStart = toMin(second.time);
+      const gap = blockers.length > 0 ? secondStart - latestFirstReady : 999;
+
+      const capotavola = Math.max(0, secondPeople - destination.capacity);
+      const prepMinutes = 4 + Math.ceil(secondPeople / 2) + Math.max(0, destination.tables.length - 1) * 3 + Number(second.highchairs || 0) * 2 + capotavola * 2;
+
+      let score = 0;
+      if (secondPeople >= 8) score += 40;
+      if (secondPeople >= 6) score += 25;
+      if (blockers.length > 0) score += 35;
+      if (gap <= 10) score += 45;
+      else if (gap <= 20) score += 30;
+      else if (gap <= 35) score += 15;
+      score += Math.min(20, destination.tables.length * 4);
+      score += Number(second.highchairs || 0) * 8;
+      score += capotavola * 8;
+
+      const priority: TurnInstruction["priority"] = score >= 75 ? "alta" : score >= 40 ? "media" : "bassa";
+      const details: string[] = [];
+
+      details.push(`Preparare ${destination.label} per ${second.name} x${secondPeople} alle ${second.time}.`);
+      details.push(`Tavoli coinvolti: ${destination.tables.map((table) => table.label).join(" + ")}.`);
+      details.push(`Tempo preparazione stimato: circa ${prepMinutes} min.`);
+
+      if (capotavola > 0) details.push(`Aggiungere ${capotavola} capotavola.`);
+      else if (secondPeople > destination.capacity - 2) details.push("Controllare disposizione posti: tavolo vicino al limite di capienza.");
+
+      if (second.highchairs > 0) details.push(`Preparare ${second.highchairs} seggiolone/i per bambini.`);
+      if (second.notes) details.push(`Note prenotazione: ${second.notes}.`);
+
+      if (blockers.length > 0) {
+        details.push(`Tavolo attualmente usato al primo turno da: ${blockers.map((r) => `${r.name} x${peopleCount(r)} alle ${r.time}`).join(", ")}.`);
+        details.push(gap < 0
+          ? `Rischio alto: il tavolo sarebbe pronto circa ${Math.abs(gap)} min dopo l'arrivo di ${second.name}.`
+          : `Gap stimato tra reset primo turno e arrivo secondo turno: ${gap} min.`);
+      } else {
+        details.push("Nessun cliente del primo turno risulta assegnato agli stessi moduli: preparazione libera.");
+      }
+
+      if (destination.tables.length > 1) {
+        details.push(`Unire/controllare disposizione di ${destination.tables.length} tavoli prima dell'arrivo.`);
+      }
+
+      const alternativeDestination = candidateDestinationsForPeople(secondPeople, destination.tables.map((table) => table.id))
+        .map((candidate) => ({ candidate, conflicts: uniqueReservations(conflictsForModules(candidate.moduleIds, second)) }))
+        .filter((entry) => entry.conflicts.length === 0)
+        .find((entry) => entry.candidate.id !== destination.id);
+
+      const alternative = blockers.length > 0 && alternativeDestination
+        ? `Alternativa se ${destination.label} non è libero: sistemare ${second.name} a ${alternativeDestination.candidate.label}, usando ${alternativeDestination.candidate.tables.map((table) => table.label).join(" + ")}.`
+        : blockers.length > 0
+          ? "Nessuna alternativa pulita trovata automaticamente: se il primo turno ritarda, avvisare Matteo/direttore di sala."
+          : undefined;
+
+      instructions.push({
+        id: String(second.id),
+        priority,
+        title: `${priority === "alta" ? "URGENTE" : priority === "media" ? "DA PREPARARE" : "CONTROLLO"} · ${destination.label} → ${second.name} x${secondPeople}`,
+        details,
+        alternative,
+        score,
+      });
+    });
+
+    return instructions.sort((a, b) => b.score - a.score);
+  }, [activeReservations, selectedDate, now]);
 
   function findCurrentBaseTable(r: Reservation) {
     return BASE_TABLES.find((table) => reservationUsesTable(r, table)) || null;
@@ -1263,6 +1365,13 @@ export default function ServizioPage() {
                 {occupiedCount} occupati
               </button>
 
+              <button
+                onClick={() => setShowTurnInstructions(true)}
+                className="px-3 py-2 rounded-xl border bg-blue-700 text-white"
+              >
+                Istruzioni cambio turno
+              </button>
+
               <button onClick={() => window.print()} className="px-3 py-2 rounded-xl border bg-white">
                 Stampa
               </button>
@@ -1505,6 +1614,59 @@ export default function ServizioPage() {
             </div>
           )}
         </section>
+
+        {showTurnInstructions && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 max-h-[90vh] overflow-auto shadow-2xl">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-3xl font-black">Istruzioni cambio turno</h2>
+                  <p className="text-sm text-gray-500 mt-1">Ordine operativo calcolato incrociando primo e secondo turno, tavoli che girano, persone, seggioloni, capotavola e tempi di preparazione.</p>
+                </div>
+                <button
+                  onClick={() => setShowTurnInstructions(false)}
+                  className="border rounded-xl px-4 py-2 bg-white font-semibold"
+                >
+                  Chiudi
+                </button>
+              </div>
+
+              {turnInstructions.length === 0 ? (
+                <div className="border rounded-2xl p-4 bg-green-50 text-green-900 font-semibold">
+                  Nessuna istruzione critica rilevata per il cambio turno.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {turnInstructions.map((instruction, index) => (
+                    <div
+                      key={instruction.id}
+                      className={`border rounded-2xl p-4 ${instruction.priority === "alta" ? "bg-red-50 border-red-300" : instruction.priority === "media" ? "bg-yellow-50 border-yellow-300" : "bg-blue-50 border-blue-300"}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-xl font-black">{index + 1}. {instruction.title}</div>
+                        <div className={`text-xs font-black px-3 py-1 rounded-full ${instruction.priority === "alta" ? "bg-red-200 text-red-950" : instruction.priority === "media" ? "bg-yellow-200 text-yellow-950" : "bg-blue-200 text-blue-950"}`}>
+                          {instruction.priority.toUpperCase()}
+                        </div>
+                      </div>
+
+                      <ul className="mt-3 space-y-1 text-sm list-disc pl-5">
+                        {instruction.details.map((detail, detailIndex) => (
+                          <li key={detailIndex}>{detail}</li>
+                        ))}
+                      </ul>
+
+                      {instruction.alternative && (
+                        <div className="mt-3 rounded-xl bg-white/80 border p-3 text-sm font-semibold">
+                          {instruction.alternative}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {selectedTable && (
           <div className="fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4">
