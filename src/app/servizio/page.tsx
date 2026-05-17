@@ -312,7 +312,7 @@ export default function ServizioPage() {
       setNow(currentTimeLabel());
       const data = await loadReservations();
       setReservations(data || []);
-    }, 30000);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, []);
