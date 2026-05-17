@@ -292,6 +292,9 @@ export default function ServizioPage() {
   const [mapTurn, setMapTurn] = useState<MapTurn>("primo");
   const [moveReservation, setMoveReservation] = useState<Reservation | null>(null);
   const [selectedMoveTables, setSelectedMoveTables] = useState<BaseTable[]>([]);
+  const [passageMode, setPassageMode] = useState(false);
+  const [selectedPassageTables, setSelectedPassageTables] = useState<BaseTable[]>([]);
+  const [passagePeople, setPassagePeople] = useState(2);
   const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -550,6 +553,43 @@ export default function ServizioPage() {
     };
   }
 
+  function candidateDestinationsForPeople(totalPeople: number, forbiddenTableIds: string[] = []) {
+    const byArea: Record<string, BaseTable[]> = {};
+
+    BASE_TABLES
+      .filter((table) => !forbiddenTableIds.includes(table.id))
+      .forEach((table) => {
+        const area = table.area;
+        byArea[area] = byArea[area] || [];
+        byArea[area].push(table);
+      });
+
+    const candidates: MoveDestination[] = [];
+
+    Object.values(byArea).forEach((tables) => {
+      const sorted = [...tables].sort((a, b) => tableNumberFromLabel(a.label) - tableNumberFromLabel(b.label));
+
+      for (let start = 0; start < sorted.length; start++) {
+        for (let size = 1; size <= 6 && start + size <= sorted.length; size++) {
+          const group = sorted.slice(start, start + size);
+          const destination = makeMoveDestination(group);
+          if (!destination) continue;
+          if (destination.capacity < totalPeople) continue;
+          candidates.push(destination);
+        }
+      }
+    });
+
+    const unique = new Map<string, MoveDestination>();
+    candidates.forEach((destination) => unique.set(destination.id, destination));
+
+    return Array.from(unique.values()).sort((a, b) => {
+      const capacityWasteA = a.capacity - totalPeople;
+      const capacityWasteB = b.capacity - totalPeople;
+      return capacityWasteA - capacityWasteB || a.tables.length - b.tables.length || a.label.localeCompare(b.label);
+    });
+  }
+
   function conflictsForModules(moduleIds: string[], target: Reservation) {
     const start = toMin(target.time);
     const end = getEstimatedReleaseMin(target);
@@ -638,30 +678,28 @@ export default function ServizioPage() {
 
   function alternativeMoveMessage(target: Reservation, forbiddenTableIds: string[]) {
     const totalPeople = peopleCount(target);
-    const alternatives = BASE_TABLES
-      .filter((table) => !forbiddenTableIds.includes(table.id))
-      .filter((table) => getTableCapacity(table) >= totalPeople)
-      .map((table) => ({ table, conflicts: conflictsForTable(table, target) }))
-      .filter((entry) => entry.conflicts.length === 0)
-      .sort((a, b) => getTableCapacity(a.table) - getTableCapacity(b.table));
+    const destinations = candidateDestinationsForPeople(totalPeople, forbiddenTableIds);
 
-    if (alternatives.length > 0) {
-      const table = alternatives[0].table;
-      return `Alternativa consigliata: puoi spostare ${target.name} a ${table.label}, senza scambiare nessuna prenotazione.`;
+    const clean = destinations
+      .map((destination) => ({ destination, conflicts: conflictsForModules(destination.moduleIds, target) }))
+      .filter((entry) => uniqueReservations(entry.conflicts).length === 0);
+
+    if (clean.length > 0) {
+      const destination = clean[0].destination;
+      return `Alternativa consigliata: puoi spostare ${target.name} a ${destination.label}, usando ${destination.tables.map((table) => table.label).join(" + ")}, senza scambiare nessuna prenotazione.`;
     }
 
-    const safeSwap = BASE_TABLES
-      .filter((table) => !forbiddenTableIds.includes(table.id))
-      .map((table) => ({ table, conflicts: conflictsForTable(table, target) }))
+    const sourceDestination = sourceDestinationForTarget(target);
+    const safeSwap = destinations
+      .map((destination) => ({ destination, conflicts: uniqueReservations(conflictsForModules(destination.moduleIds, target)) }))
       .find((entry) => {
         if (entry.conflicts.length !== 1) return false;
         const other = entry.conflicts[0];
-        const source = findCurrentBaseTable(target);
-        return !!source && canMoveOtherReservationToOldTable(other, source, target) && !hasStrongPreference(other);
+        return !!sourceDestination && canMoveOtherReservationToOldTable(other, sourceDestination.tables[0], target) && !hasStrongPreference(other);
       });
 
     if (safeSwap) {
-      return `Alternativa possibile: sposta ${target.name} a ${safeSwap.table.label} facendo scambio con ${safeSwap.conflicts[0].name}, senza criticità evidenti.`;
+      return `Alternativa possibile: sposta ${target.name} a ${safeSwap.destination.label} facendo scambio con ${safeSwap.conflicts[0].name}, senza criticità evidenti.`;
     }
 
     return "Non ho trovato un'alternativa pulita automatica: serve decisione manuale del direttore di sala.";
@@ -670,6 +708,8 @@ export default function ServizioPage() {
   function startManualMove(target: Reservation) {
     setMoveReservation(target);
     setSelectedMoveTables([]);
+    setPassageMode(false);
+    setSelectedPassageTables([]);
     setSelectedTable(null);
     setChangeRequestId(null);
     const targetTurn = mapTurnOf(target.time);
@@ -757,9 +797,96 @@ export default function ServizioPage() {
     setSelectedTable(null);
   }
 
+  function startPassageSelection(initialTable?: BaseTable) {
+    setPassageMode(true);
+    setMoveReservation(null);
+    setSelectedMoveTables([]);
+    setSelectedTable(null);
+    setTableFilter("tutti");
+    setAreaFilter("TUTTE");
+    setSelectedPassageTables(initialTable ? [initialTable] : []);
+  }
+
+  function togglePassageTable(table: BaseTable) {
+    setSelectedPassageTables((prev) => {
+      if (prev.some((t) => t.id === table.id)) return prev.filter((t) => t.id !== table.id);
+      return [...prev, table];
+    });
+  }
+
+  function isPassageTableSelected(table: BaseTable) {
+    return selectedPassageTables.some((t) => t.id === table.id);
+  }
+
+  async function performPassageMultiple() {
+    const people = Number(passagePeople || 0);
+    if (!people || people < 1) {
+      alert("Inserisci il numero di persone del passaggio.");
+      return;
+    }
+
+    const destination = makeMoveDestination(selectedPassageTables);
+    if (!destination) {
+      alert("Seleziona uno o più tavoli dalla mappa per il passaggio.");
+      return;
+    }
+
+    if (destination.capacity < people) {
+      const ok = window.confirm(`${destination.label} ha capienza rapida ${destination.capacity} posti, ma il passaggio è da ${people} persone. Vuoi confermare comunque?`);
+      if (!ok) return;
+    }
+
+    const time = currentTimeLabel();
+    const tempTarget: Reservation = {
+      id: Date.now(),
+      date: selectedDate,
+      name: "Passaggio",
+      phone: "",
+      time,
+      adults: people,
+      highchairs: 0,
+      category: "normale",
+      areaPreference: "nessuna",
+      table: destination.label,
+      optionId: destination.id,
+      moduleIds: destination.moduleIds,
+      status: "arrivato",
+      consumption: "non_so",
+      notes: "Inserito dalla modalità servizio",
+      mode: "passaggio",
+      seatedAt: Date.now(),
+    };
+
+    const conflicts = uniqueReservations(conflictsForModules(destination.moduleIds, tempTarget));
+    if (conflicts.length > 0) {
+      const ok = window.confirm(
+        `Attenzione: sui tavoli selezionati risultano già prenotazioni/occupazioni sovrapposte: ${conflicts.map((r) => `${r.name} alle ${r.time}`).join(", ")}. Vuoi forzare comunque il passaggio?`
+      );
+      if (!ok) return;
+    }
+
+    const updated = [tempTarget, ...reservations];
+    setReservations(updated);
+    await saveReservations(updated);
+    setPassageMode(false);
+    setSelectedPassageTables([]);
+    setPassagePeople(2);
+    setSelectedTable(null);
+  }
+
+  function tableSelectionClass(table: BaseTable) {
+    if (moveReservation && isMoveTableSelected(table)) return "ring-4 ring-blue-600 scale-95";
+    if (passageMode && isPassageTableSelected(table)) return "ring-4 ring-green-700 scale-95";
+    return "";
+  }
+
   function handleTableClick(row: any) {
     if (moveReservation) {
       toggleMoveTable(row.table);
+      return;
+    }
+    if (passageMode) {
+      togglePassageTable(row.table);
       return;
     }
     setSelectedTable(row);
@@ -811,6 +938,14 @@ export default function ServizioPage() {
   }
 
   async function occupyTableNow(table: BaseTable) {
+    const value = window.prompt("Numero persone per il passaggio", "2");
+    if (value === null) return;
+    const people = Number(value);
+    if (!people || people < 1) {
+      alert("Numero persone non valido.");
+      return;
+    }
+
     const time = currentTimeLabel();
     const newReservation: Reservation = {
       id: Date.now(),
@@ -818,7 +953,7 @@ export default function ServizioPage() {
       name: "Passaggio",
       phone: "",
       time,
-      adults: 2,
+      adults: people,
       highchairs: 0,
       category: "normale",
       areaPreference: "nessuna",
@@ -1035,8 +1170,16 @@ export default function ServizioPage() {
               <h2 className="text-2xl font-bold">Passaggio veloce</h2>
               <p className="text-sm text-gray-500">I migliori tavoli disponibili ora, ordinati per non sprecare tavoli grandi.</p>
             </div>
-            <div className="text-sm font-semibold text-green-800">
-              {freeAllNightCount + freeNowCount} tavoli utilizzabili ora
+            <div className="flex flex-wrap gap-2 items-center">
+              <div className="text-sm font-semibold text-green-800">
+                {freeAllNightCount + freeNowCount} tavoli utilizzabili ora
+              </div>
+              <button
+                onClick={() => startPassageSelection()}
+                className="rounded-xl bg-green-700 text-white px-4 py-3 font-semibold"
+              >
+                Passaggio multiplo da mappa
+              </button>
             </div>
           </div>
 
@@ -1159,6 +1302,50 @@ export default function ServizioPage() {
             </div>
           )}
 
+          {passageMode && (
+            <div className="mb-4 rounded-2xl border-2 border-green-300 bg-green-50 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div className="text-xl font-black text-green-950">Passaggio multiplo attivo</div>
+                <div className="text-sm text-green-900">
+                  Inserisci persone, poi tocca uno o più tavoli sulla mappa e conferma.
+                </div>
+                {selectedPassageTables.length > 0 && (
+                  <div className="text-sm font-bold text-green-950 mt-1">
+                    Selezionati: {selectedPassageTables.map((table) => table.label).join(", ")}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2 flex-wrap items-center">
+                <label className="text-sm font-bold">
+                  Persone
+                  <input
+                    type="number"
+                    min={1}
+                    className="ml-2 w-20 border rounded-xl px-3 py-2 bg-white"
+                    value={passagePeople}
+                    onChange={(e) => setPassagePeople(Number(e.target.value))}
+                  />
+                </label>
+                <button
+                  onClick={performPassageMultiple}
+                  className="rounded-xl bg-green-700 text-white px-4 py-3 font-semibold"
+                >
+                  Conferma passaggio
+                </button>
+                <button
+                  onClick={() => {
+                    setPassageMode(false);
+                    setSelectedPassageTables([]);
+                    setPassagePeople(2);
+                  }}
+                  className="rounded-xl border bg-white px-4 py-3 font-semibold"
+                >
+                  Annulla
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="rounded-3xl bg-gray-50 border p-3 md:p-4 overflow-x-auto">
             <div className="min-w-[920px] grid grid-cols-12 gap-3">
 
@@ -1177,7 +1364,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${tableSelectionClass(row.table)}`}
                       >
                         <div className="text-2xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1206,7 +1393,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${tableSelectionClass(row.table)}`}
                       >
                         <div className="text-2xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1235,7 +1422,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${tableSelectionClass(row.table)}`}
                       >
                         <div className="text-2xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1264,7 +1451,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
+                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${tableSelectionClass(row.table)}`}
                       >
                         <div className="text-3xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1293,7 +1480,7 @@ export default function ServizioPage() {
                       <button
                         key={row.table.id}
                         onClick={() => handleTableClick(row)}
-                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${moveReservation && isMoveTableSelected(row.table) ? "ring-4 ring-blue-600 scale-95" : ""}`}
+                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)} ${tableSelectionClass(row.table)}`}
                       >
                         <div className="text-3xl font-black leading-none">
                           {row.displayNumber}{row.mustTurn ? " ↻" : ""}
@@ -1413,10 +1600,7 @@ export default function ServizioPage() {
 
                 {selectedTable.status !== "occupato" && (
                   <button
-                    onClick={async () => {
-                      await occupyTableNow(selectedTable.table);
-                      setSelectedTable(null);
-                    }}
+                    onClick={() => startPassageSelection(selectedTable.table)}
                     className="w-full rounded-2xl bg-black text-white py-4 font-bold text-lg"
                   >
                     Occupa ora · passaggio
