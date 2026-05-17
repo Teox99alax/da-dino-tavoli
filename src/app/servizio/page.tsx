@@ -250,6 +250,7 @@ export default function ServizioPage() {
   const [lastSoundMessage, setLastSoundMessage] = useState("");
   const [tableFilter, setTableFilter] = useState<TableFilter>("tutti");
   const [areaFilter, setAreaFilter] = useState<AreaFilter>("TUTTE");
+  const [selectedTable, setSelectedTable] = useState<any | null>(null);
   const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -759,126 +760,274 @@ export default function ServizioPage() {
           </div>
         </section>
 
-        <section className="bg-white border rounded-2xl p-5">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+        <section className="bg-white border rounded-3xl p-4 overflow-hidden">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-2xl font-bold">Tavoli</h2>
+              <h2 className="text-2xl font-bold">Mappa sala live</h2>
               <p className="text-sm text-gray-500">
                 Verde libero tutta la sera · Giallo libero ora ma prenotato più tardi · Rosso occupato
               </p>
             </div>
 
-            <div className="flex gap-2 flex-wrap">
-              <select className="border rounded-xl px-3 py-2 bg-white" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value as AreaFilter)}>
-                <option value="TUTTE">Tutte le aree</option>
-                <option value="SALA">Sala</option>
-                <option value="SALETTA">Saletta</option>
-                <option value="DEHOR">Dehor</option>
-                <option value="MARCIAPIEDE">Marciapiede</option>
-                <option value="ESTERNO">Esterno</option>
-              </select>
-              <button onClick={() => setTableFilter("tutti")} className={`border rounded-xl px-4 py-2 ${tableFilter === "tutti" ? "bg-black text-white" : "bg-white"}`}>Tutti</button>
-              <button onClick={() => setTableFilter("liberi")} className={`border rounded-xl px-4 py-2 ${tableFilter === "liberi" ? "bg-green-700 text-white" : "bg-white"}`}>Solo liberi</button>
-              <button onClick={() => setTableFilter("liberi_ora")} className={`border rounded-xl px-4 py-2 ${tableFilter === "liberi_ora" ? "bg-yellow-500 text-white" : "bg-white"}`}>Liberi ora</button>
-              <button onClick={() => setTableFilter("occupati")} className={`border rounded-xl px-4 py-2 ${tableFilter === "occupati" ? "bg-red-700 text-white" : "bg-white"}`}>Occupati</button>
-              <button onClick={() => window.print()} className="border rounded-xl px-4 py-2 bg-white">Stampa</button>
+            <div className="flex gap-2 flex-wrap text-sm font-bold">
+              <button
+                onClick={() => {
+                  setTableFilter("tutti");
+                  setAreaFilter("TUTTE");
+                }}
+                className={`px-3 py-2 rounded-xl border ${tableFilter === "tutti" && areaFilter === "TUTTE" ? "bg-black text-white" : "bg-white"}`}
+              >
+                Tutti
+              </button>
+
+              <button
+                onClick={() => setTableFilter("liberi")}
+                className={`px-3 py-2 rounded-xl border ${tableFilter === "liberi" ? "bg-green-700 text-white" : "bg-green-100 text-green-900"}`}
+              >
+                {freeAllNightCount} liberi
+              </button>
+
+              <button
+                onClick={() => setTableFilter("liberi_ora")}
+                className={`px-3 py-2 rounded-xl border ${tableFilter === "liberi_ora" ? "bg-yellow-500 text-white" : "bg-yellow-100 text-yellow-900"}`}
+              >
+                {freeAllNightCount + freeNowCount} liberi ora
+              </button>
+
+              <button
+                onClick={() => setTableFilter("occupati")}
+                className={`px-3 py-2 rounded-xl border ${tableFilter === "occupati" ? "bg-red-700 text-white" : "bg-red-100 text-red-900"}`}
+              >
+                {occupiedCount} occupati
+              </button>
+
+              <button onClick={() => window.print()} className="px-3 py-2 rounded-xl border bg-white">
+                Stampa
+              </button>
             </div>
           </div>
 
-          <div className="space-y-6">
-            {Object.entries(groupedTables).map(([area, rows]) => {
-              if (rows.length === 0) return null;
+          <div className="rounded-3xl bg-gray-50 border p-3 md:p-4 overflow-x-auto">
+            <div className="min-w-[920px] grid grid-cols-12 gap-3">
 
-              return (
-                <div key={area}>
-                  <h3 className="text-xl font-bold mb-3">{area}</h3>
+              <div className="col-span-8 bg-yellow-50 border border-yellow-200 rounded-3xl p-3">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-black text-lg">ESTERNO</div>
+                  <div className="text-xs text-gray-500 font-semibold">Tavoli 13/14/15 nascosti finché non montati</div>
+                </div>
 
-                  <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {rows.map(({ table, matches, status, capacity }) => (
-                      <div key={table.id} className={`border rounded-2xl p-4 ${tableStatusClass(status)}`}>
-                        <div className="flex justify-between gap-2">
-                          <div>
-                            <div className="text-xl font-bold">{table.label}</div>
-                            <div className="text-sm font-medium">
-                              {status === "libero" && "LIBERO TUTTA LA SERA"}
-                              {status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO PIÙ TARDI"}
-                              {status === "occupato" && "OCCUPATO"}
-                            </div>
-                            <div className="text-xs mt-1 opacity-80">Capienza rapida: {capacity} posti</div>
-                          </div>
+                <div className="grid grid-cols-6 gap-2">
+                  {visibleTableRows
+                    .filter((row) => row.table.area === "ESTERNO")
+                    .filter((row) => !["esterno-13", "esterno-14", "esterno-15"].includes(row.table.id))
+                    .map((row) => (
+                      <button
+                        key={row.table.id}
+                        onClick={() => setSelectedTable(row)}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                      >
+                        <div className="text-2xl font-black leading-none">
+                          {row.table.label.split(" ")[0]}
                         </div>
-
-                        <div className="mt-3 space-y-2">
-                          {matches.length === 0 && (
-                            <div className="text-sm opacity-80">Nessuna prenotazione su questo tavolo.</div>
-                          )}
-
-                          {matches.map((r) => {
-                            const mins = toMin(r.time) - nowMin();
-                            return (
-                              <div key={r.id} className="bg-white/70 rounded-xl p-2 text-sm">
-                                <div className="font-semibold">
-                                  {r.name} x{r.adults} · {r.time} · {turnOf(r.time)}
-                                </div>
-                                <div>
-                                  Stato: {r.status} · {isOccupiedStatus(r.status) ? `libero stimato alle ${getEstimatedReleaseTime(r)}` : minutesLabel(mins)}
-                                  {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
-                                </div>
-                                {r.notes && <div>Note: {r.notes}</div>}
-
-                                <div className="flex gap-2 mt-2 flex-wrap">
-                                  <button
-                                    onClick={() => updateStatus(r.id, "arrivato")}
-                                    className="rounded-lg bg-black text-white px-3 py-2"
-                                  >
-                                    Arrivato
-                                  </button>
-
-                                  <button
-                                    onClick={() => updateStatus(r.id, "seduto")}
-                                    className="rounded-lg border bg-white px-3 py-2"
-                                  >
-                                    Seduto
-                                  </button>
-
-                                  <button
-                                    onClick={() => updateStatus(r.id, "liberato")}
-                                    className="rounded-lg border bg-white px-3 py-2"
-                                  >
-                                    Liberato
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-
-                          {status !== "occupato" && (
-                            <button
-                              onClick={() => occupyTableNow(table)}
-                              className="mt-2 w-full rounded-xl bg-black text-white px-4 py-3 font-semibold"
-                            >
-                              Occupa ora · passaggio
-                            </button>
-                          )}
-
-                          {status === "occupato" && (
-                            <div className="text-xs font-medium mt-2 opacity-80">
-                              Tavolo occupato: per liberarlo usa il pulsante Liberato sulla prenotazione/passaggio.
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                        <div className="text-[10px] font-bold uppercase opacity-70">esterno</div>
+                      </button>
                     ))}
+                </div>
+              </div>
+
+              <div className="col-span-4 bg-red-50 border border-red-200 rounded-3xl p-3">
+                <div className="font-black text-lg mb-3">MARCIAPIEDE</div>
+
+                <div className="grid grid-cols-5 gap-2">
+                  {visibleTableRows
+                    .filter((row) => row.table.area === "MARCIAPIEDE")
+                    .map((row) => (
+                      <button
+                        key={row.table.id}
+                        onClick={() => setSelectedTable(row)}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                      >
+                        <div className="text-2xl font-black leading-none">
+                          {row.table.label.split(" ")[0]}
+                        </div>
+                        <div className="text-[9px] font-bold uppercase opacity-70">marciap.</div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              <div className="col-span-7 bg-gray-100 border border-gray-300 rounded-3xl p-3">
+                <div className="font-black text-lg mb-3">DEHOR</div>
+
+                <div className="grid grid-cols-5 gap-2">
+                  {visibleTableRows
+                    .filter((row) => row.table.area === "DEHOR")
+                    .map((row) => (
+                      <button
+                        key={row.table.id}
+                        onClick={() => setSelectedTable(row)}
+                        className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                      >
+                        <div className="text-2xl font-black leading-none">
+                          {row.table.label.split(" ")[0]}
+                        </div>
+                        <div className="text-[10px] font-bold uppercase opacity-70">dehor</div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              <div className="col-span-5 row-span-2 bg-blue-50 border border-blue-200 rounded-3xl p-3">
+                <div className="font-black text-lg mb-3">SALETTA</div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {visibleTableRows
+                    .filter((row) => row.table.area === "SALETTA")
+                    .map((row) => (
+                      <button
+                        key={row.table.id}
+                        onClick={() => setSelectedTable(row)}
+                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                      >
+                        <div className="text-3xl font-black leading-none">
+                          {row.table.label.split(" ")[0]}
+                        </div>
+                        <div className="text-[10px] font-bold uppercase opacity-70">saletta</div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              <div className="col-span-7 bg-green-50 border border-green-200 rounded-3xl p-3">
+                <div className="font-black text-lg mb-3">SALA</div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {visibleTableRows
+                    .filter((row) => row.table.area === "SALA")
+                    .map((row) => (
+                      <button
+                        key={row.table.id}
+                        onClick={() => setSelectedTable(row)}
+                        className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
+                      >
+                        <div className="text-3xl font-black leading-none">
+                          {row.table.label.split(" ")[0]}
+                        </div>
+                        <div className="text-[10px] font-bold uppercase opacity-70">sala</div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {visibleTableRows.length === 0 && (
+            <div className="text-gray-500 border rounded-xl p-4 bg-gray-50 mt-4">
+              Nessun tavolo con questi filtri.
+            </div>
+          )}
+        </section>
+
+        {selectedTable && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-xl p-5 max-h-[90vh] overflow-auto shadow-2xl">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <div className="text-3xl font-black">{selectedTable.table.label}</div>
+                  <div className="text-sm text-gray-500 mt-1">
+                    {selectedTable.capacity} posti · {selectedTable.table.area}
+                  </div>
+                  <div className={`inline-block mt-3 px-3 py-2 rounded-xl text-sm font-bold ${tableStatusClass(selectedTable.status)}`}>
+                    {selectedTable.status === "libero" && "LIBERO TUTTA LA SERA"}
+                    {selectedTable.status === "prenotato_dopo" && "LIBERO ORA · PRENOTATO PIÙ TARDI"}
+                    {selectedTable.status === "occupato" && "OCCUPATO"}
                   </div>
                 </div>
-              );
-            })}
 
-            {visibleTableRows.length === 0 && (
-              <div className="text-gray-500 border rounded-xl p-4 bg-gray-50">Nessun tavolo con questi filtri.</div>
-            )}
+                <button
+                  onClick={() => setSelectedTable(null)}
+                  className="border rounded-xl px-4 py-2 bg-white font-semibold"
+                >
+                  Chiudi
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {selectedTable.matches.length === 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded-2xl p-4 font-semibold text-green-900">
+                    Tavolo libero. Nessuna prenotazione su questo tavolo.
+                  </div>
+                )}
+
+                {selectedTable.matches.map((r: Reservation) => {
+                  const mins = toMin(r.time) - nowMin();
+
+                  return (
+                    <div key={r.id} className="border rounded-2xl p-4 bg-gray-50">
+                      <div className="text-xl font-bold">
+                        {r.name} x{r.adults} · {r.time}
+                      </div>
+
+                      <div className="text-sm mt-1 font-medium">
+                        Stato: {r.status} · {turnOf(r.time)}
+                        {r.highchairs ? ` · ${r.highchairs} seggiolone` : ""}
+                      </div>
+
+                      <div className="text-sm mt-1 text-gray-600">
+                        {isOccupiedStatus(r.status)
+                          ? `Libero stimato alle ${getEstimatedReleaseTime(r)}`
+                          : minutesLabel(mins)}
+                      </div>
+
+                      {r.notes && <div className="text-sm mt-2">Note: {r.notes}</div>}
+
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        <button
+                          onClick={() => updateStatus(r.id, "arrivato")}
+                          className="rounded-xl bg-black text-white px-4 py-3 font-semibold"
+                        >
+                          Arrivato
+                        </button>
+
+                        <button
+                          onClick={() => updateStatus(r.id, "seduto")}
+                          className="rounded-xl border bg-white px-4 py-3 font-semibold"
+                        >
+                          Seduto
+                        </button>
+
+                        <button
+                          onClick={() => updateStatus(r.id, "liberato")}
+                          className="rounded-xl border bg-white px-4 py-3 font-semibold"
+                        >
+                          Liberato
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {selectedTable.status !== "occupato" && (
+                  <button
+                    onClick={async () => {
+                      await occupyTableNow(selectedTable.table);
+                      setSelectedTable(null);
+                    }}
+                    className="w-full rounded-2xl bg-black text-white py-4 font-bold text-lg"
+                  >
+                    Occupa ora · passaggio
+                  </button>
+                )}
+
+                {selectedTable.status === "occupato" && (
+                  <div className="text-xs font-medium opacity-70">
+                    Tavolo occupato: per liberarlo usa il pulsante Liberato sulla prenotazione/passaggio.
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        </section>
+        )}
 
         <section className="bg-white border rounded-2xl p-5">
           <h2 className="text-2xl font-bold mb-4">Arrivi imminenti</h2>
@@ -952,6 +1101,3 @@ export default function ServizioPage() {
     </div>
   );
 }
-
-
-
