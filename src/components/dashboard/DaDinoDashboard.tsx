@@ -1,3 +1,7 @@
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, BarChart3, CheckCircle2, Clock3, CloudRain, LogOut, MapPinned, Search, Trash2, Users, Utensils, Zap, FileText, History } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { saveReservations, loadReservations } from "@/lib/storage";
