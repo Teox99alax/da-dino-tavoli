@@ -281,6 +281,7 @@ export default function ServizioPage() {
   const [areaFilter, setAreaFilter] = useState<AreaFilter>("TUTTE");
   const [selectedTable, setSelectedTable] = useState<any | null>(null);
   const [mapTurn, setMapTurn] = useState<MapTurn>("primo");
+  const [moveReservation, setMoveReservation] = useState<Reservation | null>(null);
   const notifiedArrivalIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -517,6 +518,175 @@ export default function ServizioPage() {
     return suggestions.slice(0, 4);
   }
 
+
+  function moveWarningDetails(target: Reservation, destination: BaseTable, swapReservation: Reservation | null, sourceTable: BaseTable | null) {
+    const warnings: string[] = [];
+
+    if (!sourceTable) {
+      warnings.push(`Non riesco a riconoscere il tavolo attuale di ${target.name}. Lo spostamento va controllato manualmente.`);
+    }
+
+    if (getTableCapacity(destination) < peopleCount(target)) {
+      warnings.push(`${destination.label} ha capienza rapida ${getTableCapacity(destination)} posti, ma ${target.name} è da ${peopleCount(target)} persone.`);
+    }
+
+    if (swapReservation && sourceTable) {
+      if (getTableCapacity(sourceTable) < peopleCount(swapReservation)) {
+        warnings.push(`${swapReservation.name} è da ${peopleCount(swapReservation)} persone: ${sourceTable.label} potrebbe essere stretto.`);
+      }
+
+      if (swapReservation.areaPreference && swapReservation.areaPreference !== "nessuna") {
+        const requestedArea = String(swapReservation.areaPreference).toLowerCase();
+        if (requestedArea === destination.area.toLowerCase() && sourceTable.area !== destination.area) {
+          warnings.push(`${swapReservation.name} aveva chiesto/preferito la zona ${destination.area.toLowerCase()}: spostarla a ${sourceTable.label} potrebbe creare problemi all'arrivo.`);
+        } else if (requestedArea !== sourceTable.area.toLowerCase()) {
+          warnings.push(`${swapReservation.name} aveva preferenza ${requestedArea}: ${sourceTable.label} non rispetta questa preferenza.`);
+        }
+      }
+
+      const note = (swapReservation.notes || "").toLowerCase();
+      const sensitiveWords = ["specific", "richiesto", "chiesto", "tavolo", "posto", "fisso", "solito", "prefer", "vip", "importante"];
+      if (sensitiveWords.some((word) => note.includes(word))) {
+        warnings.push(`Nelle note di ${swapReservation.name} c'è una possibile richiesta specifica: "${swapReservation.notes}".`);
+      }
+
+      const swapStart = toMin(swapReservation.time);
+      const swapEnd = getEstimatedReleaseMin(swapReservation);
+      const sourceConflicts = activeReservations.filter((r) => {
+        if (r.id === target.id || r.id === swapReservation.id) return false;
+        if (!reservationUsesTable(r, sourceTable)) return false;
+        return overlap(swapStart, swapEnd, toMin(r.time), getEstimatedReleaseMin(r));
+      });
+
+      if (sourceConflicts.length > 0) {
+        warnings.push(`${sourceTable.label} non è pulito per ${swapReservation.name}: si sovrappone con ${sourceConflicts.map((r) => `${r.name} alle ${r.time}`).join(", ")}.`);
+      }
+
+      const secondTurnOnSource = activeReservations.find((r) => {
+        if (r.id === target.id || r.id === swapReservation.id) return false;
+        return mapTurnOf(r.time) === "secondo" && reservationUsesTable(r, sourceTable);
+      });
+
+      if (secondTurnOnSource && mapTurnOf(swapReservation.time) === "primo") {
+        warnings.push(`${sourceTable.label} deve girare al secondo turno per ${secondTurnOnSource.name} alle ${secondTurnOnSource.time}: attenzione ai tempi di uscita.`);
+      }
+    }
+
+    return warnings;
+  }
+
+  function alternativeMoveMessage(target: Reservation, forbiddenTableIds: string[]) {
+    const totalPeople = peopleCount(target);
+    const alternatives = BASE_TABLES
+      .filter((table) => !forbiddenTableIds.includes(table.id))
+      .filter((table) => getTableCapacity(table) >= totalPeople)
+      .map((table) => ({ table, conflicts: conflictsForTable(table, target) }))
+      .filter((entry) => entry.conflicts.length === 0)
+      .sort((a, b) => getTableCapacity(a.table) - getTableCapacity(b.table));
+
+    if (alternatives.length > 0) {
+      const table = alternatives[0].table;
+      return `Alternativa consigliata: puoi spostare ${target.name} a ${table.label}, senza scambiare nessuna prenotazione.`;
+    }
+
+    const safeSwap = BASE_TABLES
+      .filter((table) => !forbiddenTableIds.includes(table.id))
+      .map((table) => ({ table, conflicts: conflictsForTable(table, target) }))
+      .find((entry) => {
+        if (entry.conflicts.length !== 1) return false;
+        const other = entry.conflicts[0];
+        const source = findCurrentBaseTable(target);
+        return !!source && canMoveOtherReservationToOldTable(other, source, target) && !hasStrongPreference(other);
+      });
+
+    if (safeSwap) {
+      return `Alternativa possibile: sposta ${target.name} a ${safeSwap.table.label} facendo scambio con ${safeSwap.conflicts[0].name}, senza criticità evidenti.`;
+    }
+
+    return "Non ho trovato un'alternativa pulita automatica: serve decisione manuale del direttore di sala.";
+  }
+
+  function startManualMove(target: Reservation) {
+    setMoveReservation(target);
+    setSelectedTable(null);
+    setChangeRequestId(null);
+    const targetTurn = mapTurnOf(target.time);
+    setMapTurn(targetTurn);
+    setTableFilter("tutti");
+    setAreaFilter("TUTTE");
+  }
+
+  async function performManualMove(destination: BaseTable) {
+    if (!moveReservation) return;
+
+    const target = moveReservation;
+    const sourceTable = findCurrentBaseTable(target);
+
+    if (sourceTable && sourceTable.id === destination.id) {
+      alert(`${target.name} è già su ${destination.label}.`);
+      setMoveReservation(null);
+      return;
+    }
+
+    const destinationConflicts = conflictsForTable(destination, target);
+
+    if (destinationConflicts.length > 1) {
+      alert(`Non posso fare lo scambio automatico: su ${destination.label} risultano più prenotazioni sovrapposte (${destinationConflicts.map((r) => r.name).join(", ")}). ${alternativeMoveMessage(target, [destination.id, sourceTable?.id || ""])}`);
+      return;
+    }
+
+    const swapReservation = destinationConflicts.length === 1 ? destinationConflicts[0] : null;
+    const warnings = moveWarningDetails(target, destination, swapReservation, sourceTable);
+
+    if (warnings.length > 0) {
+      const alternative = alternativeMoveMessage(target, [destination.id, sourceTable?.id || ""]);
+      const ok = window.confirm(
+        `ATTENZIONE SPOSTAMENTO\n\n${warnings.join("\n\n")}\n\n${alternative}\n\nVuoi forzare comunque lo spostamento?`
+      );
+      if (!ok) return;
+    }
+
+    const destinationModules = getBaseModuleIds(destination);
+    const sourceModules = sourceTable ? getBaseModuleIds(sourceTable) : target.moduleIds;
+
+    const updated = reservations.map((r) => {
+      if (r.id === target.id) {
+        return {
+          ...r,
+          table: destination.label,
+          optionId: destination.id,
+          moduleIds: destinationModules,
+          notes: `${r.notes || ""}${r.notes ? " · " : ""}Spostato manualmente da sala a ${destination.label}`,
+        };
+      }
+
+      if (swapReservation && sourceTable && r.id === swapReservation.id) {
+        return {
+          ...r,
+          table: sourceTable.label,
+          optionId: sourceTable.id,
+          moduleIds: sourceModules,
+          notes: `${r.notes || ""}${r.notes ? " · " : ""}Spostato automaticamente per scambio con ${target.name}`,
+        };
+      }
+
+      return r;
+    });
+
+    setReservations(updated);
+    await saveReservations(updated);
+    setMoveReservation(null);
+    setSelectedTable(null);
+  }
+
+  function handleTableClick(row: any) {
+    if (moveReservation) {
+      performManualMove(row.table);
+      return;
+    }
+    setSelectedTable(row);
+  }
+
   async function applyChangeSuggestion(target: Reservation, suggestion: ChangeSuggestion) {
     if (suggestion.kind === "director") return;
 
@@ -707,6 +877,12 @@ export default function ServizioPage() {
                           No-show
                         </button>
                         <button
+                          onClick={() => startManualMove(r)}
+                          className="rounded-xl bg-blue-700 text-white px-5 py-3 font-semibold"
+                        >
+                          Sposta manualmente
+                        </button>
+                        <button
                           onClick={() => setChangeRequestId(changeRequestId === r.id ? null : r.id)}
                           className="rounded-xl border bg-white px-5 py-3 font-semibold"
                         >
@@ -735,9 +911,12 @@ export default function ServizioPage() {
                                 Registra spostamento
                               </button>
                             ) : (
-                              <div className="rounded-xl bg-red-100 text-red-900 px-4 py-2 font-semibold text-sm">
-                                Decisione manuale
-                              </div>
+                              <button
+                                onClick={() => startManualMove(r)}
+                                className="rounded-xl bg-red-700 text-white px-4 py-2 font-semibold text-sm"
+                              >
+                                Forza spostamento
+                              </button>
                             )}
                           </div>
                         ))}
@@ -869,6 +1048,23 @@ export default function ServizioPage() {
             </div>
           </div>
 
+          {moveReservation && (
+            <div className="mb-4 rounded-2xl border-2 border-blue-300 bg-blue-50 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div className="text-xl font-black text-blue-950">Spostamento manuale attivo</div>
+                <div className="text-sm text-blue-900">
+                  Tocca sulla mappa il nuovo tavolo per {moveReservation.name} x{peopleCount(moveReservation)}. Se il tavolo è occupato, provo lo scambio automatico.
+                </div>
+              </div>
+              <button
+                onClick={() => setMoveReservation(null)}
+                className="rounded-xl border bg-white px-4 py-3 font-semibold"
+              >
+                Annulla spostamento
+              </button>
+            </div>
+          )}
+
           <div className="rounded-3xl bg-gray-50 border p-3 md:p-4 overflow-x-auto">
             <div className="min-w-[920px] grid grid-cols-12 gap-3">
 
@@ -886,7 +1082,7 @@ export default function ServizioPage() {
                     .map((row) => (
                       <button
                         key={row.table.id}
-                        onClick={() => setSelectedTable(row)}
+                        onClick={() => handleTableClick(row)}
                         className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-2xl font-black leading-none">
@@ -915,7 +1111,7 @@ export default function ServizioPage() {
                     .map((row) => (
                       <button
                         key={row.table.id}
-                        onClick={() => setSelectedTable(row)}
+                        onClick={() => handleTableClick(row)}
                         className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-2xl font-black leading-none">
@@ -944,7 +1140,7 @@ export default function ServizioPage() {
                     .map((row) => (
                       <button
                         key={row.table.id}
-                        onClick={() => setSelectedTable(row)}
+                        onClick={() => handleTableClick(row)}
                         className={`h-16 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-2xl font-black leading-none">
@@ -973,7 +1169,7 @@ export default function ServizioPage() {
                     .map((row) => (
                       <button
                         key={row.table.id}
-                        onClick={() => setSelectedTable(row)}
+                        onClick={() => handleTableClick(row)}
                         className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-3xl font-black leading-none">
@@ -1002,7 +1198,7 @@ export default function ServizioPage() {
                     .map((row) => (
                       <button
                         key={row.table.id}
-                        onClick={() => setSelectedTable(row)}
+                        onClick={() => handleTableClick(row)}
                         className={`h-20 rounded-2xl border-2 transition active:scale-95 shadow-sm ${tableStatusClass(row.status)}`}
                       >
                         <div className="text-3xl font-black leading-none">
@@ -1108,6 +1304,13 @@ export default function ServizioPage() {
                           className="rounded-xl border bg-white px-4 py-3 font-semibold"
                         >
                           Liberato
+                        </button>
+
+                        <button
+                          onClick={() => startManualMove(r)}
+                          className="rounded-xl bg-blue-700 text-white px-4 py-3 font-semibold"
+                        >
+                          Sposta tavolo
                         </button>
                       </div>
                     </div>
